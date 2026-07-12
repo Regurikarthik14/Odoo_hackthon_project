@@ -10,8 +10,9 @@ trips_bp = Blueprint('trips', __name__, url_prefix='/api/trips')
 @trips_bp.route('', methods=['GET'])
 @jwt_required()
 def get_trips():
+    current_user_id = int(get_jwt_identity())
     status = request.args.get('status')
-    query = Trip.query
+    query = Trip.query.filter_by(created_by=current_user_id)
     if status:
         query = query.filter_by(status=status)
     trips = query.order_by(Trip.created_at.desc()).all()
@@ -21,14 +22,19 @@ def get_trips():
 @trips_bp.route('/active', methods=['GET'])
 @jwt_required()
 def get_active_trips():
-    trips = Trip.query.filter(Trip.status.in_(['draft', 'dispatched'])).all()
+    current_user_id = int(get_jwt_identity())
+    trips = Trip.query.filter(
+        Trip.created_by == current_user_id,
+        Trip.status.in_(['draft', 'dispatched'])
+    ).all()
     return jsonify([t.to_dict() for t in trips]), 200
 
 
 @trips_bp.route('/<int:trip_id>', methods=['GET'])
 @jwt_required()
 def get_trip(trip_id):
-    trip = Trip.query.get_or_404(trip_id)
+    current_user_id = int(get_jwt_identity())
+    trip = Trip.query.filter_by(id=trip_id, created_by=current_user_id).first_or_404()
     return jsonify(trip.to_dict()), 200
 
 
@@ -39,6 +45,8 @@ def create_trip():
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    current_user_id = int(get_jwt_identity())
 
     # Validate vehicle
     vehicle_id = data.get('vehicle_id')

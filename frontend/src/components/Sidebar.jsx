@@ -11,6 +11,7 @@ const ALL_NAV_ITEMS = [
   { path: '/maintenance', label: 'Maintenance', icon: '🔧' },
   { path: '/expenses', label: 'Expenses', icon: '💰' },
   { path: '/reports', label: 'Reports', icon: '📈' },
+  { path: '/members', label: 'Members', icon: '👥' },
 ];
 
 // Role-based navigation filters
@@ -19,13 +20,13 @@ const ALL_NAV_ITEMS = [
 const ROLE_NAV_MAP = {
   fleet_manager: ALL_NAV_ITEMS,
   driver: ALL_NAV_ITEMS.filter((item) =>
-    ['/dashboard', '/trips'].includes(item.path)
+    ['/dashboard', '/trips', '/members'].includes(item.path)
   ),
   safety_officer: ALL_NAV_ITEMS.filter((item) =>
-    ['/dashboard', '/drivers'].includes(item.path)
+    ['/dashboard', '/drivers', '/members'].includes(item.path)
   ),
   financial_analyst: ALL_NAV_ITEMS.filter((item) =>
-    ['/dashboard', '/expenses', '/reports'].includes(item.path)
+    ['/dashboard', '/expenses', '/reports', '/members'].includes(item.path)
   ),
 };
 

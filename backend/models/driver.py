@@ -14,6 +14,7 @@ class Driver(db.Model):
     safety_score = db.Column(db.Float, default=100.0)
     status = db.Column(db.String(20), default='available')
     # statuses: available, on_trip, off_duty, suspended
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

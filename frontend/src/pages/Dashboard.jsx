@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { dashboardService } from '../services';
 import LoadingSpinner from '../components/LoadingSpinner';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend
+} from 'recharts';
 import './Dashboard.css';
 
 const KPI_ICONS = {
@@ -62,6 +66,17 @@ export default function Dashboard() {
     }
   };
 
+  const COLORS = {
+    orange: '#FF6B35',
+    red: '#C0392B',
+    green: '#22c55e',
+    blue: '#3b82f6',
+    purple: '#8b5cf6',
+    teal: '#14b8a6',
+    yellow: '#eab308',
+    pink: '#ec4899',
+  };
+
   const getTrend = (key) => {
     if (key === 'fleet_utilization') return 'up';
     if (key.includes('active') || key.includes('available') || key === 'completed_trips') return 'up';
@@ -72,6 +87,42 @@ export default function Dashboard() {
   const formatValue = (key, value) => {
     if (key === 'fleet_utilization') return `${value}%`;
     return value?.toLocaleString() || 0;
+  };
+
+  // Chart data preparation
+  const vehicleStatusData = kpis ? [
+    { name: 'Available', value: kpis.available_vehicles || 0, color: COLORS.green },
+    { name: 'Active', value: kpis.active_vehicles || 0, color: COLORS.blue },
+    { name: 'In Maintenance', value: kpis.vehicles_in_maintenance || 0, color: COLORS.orange },
+  ].filter(d => d.value > 0) : [];
+
+  const fleetComparisonData = kpis ? [
+    { name: 'Vehicles', Total: kpis.total_vehicles || 0, Active: kpis.active_vehicles || 0, Available: kpis.available_vehicles || 0, Completed: 0 },
+    { name: 'Drivers', Total: kpis.total_drivers || 0, Active: kpis.drivers_on_duty || 0, Available: kpis.available_drivers || 0, Completed: 0 },
+    { name: 'Trips', Total: (kpis.active_trips + kpis.pending_trips + kpis.completed_trips) || 0, Active: kpis.active_trips || 0, Available: 0, Completed: kpis.completed_trips || 0 },
+  ] : [];
+
+  const tripStatusData = kpis ? [
+    { name: 'Active', value: kpis.active_trips || 0, color: COLORS.blue },
+    { name: 'Pending', value: kpis.pending_trips || 0, color: COLORS.yellow },
+    { name: 'Completed', value: kpis.completed_trips || 0, color: COLORS.green },
+  ].filter(d => d.value > 0) : [];
+
+  // Custom tooltip for charts
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="chart-tooltip">
+          <p className="chart-tooltip-label">{label}</p>
+          {payload.map((entry, index) => (
+            <p key={index} className="chart-tooltip-value" style={{ color: entry.color }}>
+              {entry.name}: {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
   };
 
   if (!kpis) return <LoadingSpinner fullScreen text="Loading dashboard..." />;
@@ -137,7 +188,145 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <div className="section-title">
+          {/* Charts Section */}
+          <div className="charts-section">
+            <div className="section-title">📊 Fleet Analytics</div>
+            <div className="charts-grid">
+              {/* Vehicle Status PieChart */}
+              {vehicleStatusData.length > 0 && (
+                <div className="chart-card">
+                  <h3 className="chart-title">🚛 Vehicle Status Distribution</h3>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={vehicleStatusData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={4}
+                        dataKey="value"
+                        animationBegin={0}
+                        animationDuration={1000}
+                      >
+                        {vehicleStatusData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(255,255,255,0.1)" />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend
+                        verticalAlign="bottom"
+                        height={36}
+                        formatter={(value) => <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{value}</span>}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Fleet Comparison BarChart */}
+              {fleetComparisonData.length > 0 && (
+                <div className="chart-card">
+                  <h3 className="chart-title">📈 Fleet vs Drivers vs Trips</h3>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={fleetComparisonData} barGap={4}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                      <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend
+                        verticalAlign="top"
+                        height={36}
+                        formatter={(value) => <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{value}</span>}
+                      />
+                      <Bar dataKey="Total" fill={COLORS.orange} radius={[4, 4, 0, 0]} animationDuration={800} />
+                      <Bar dataKey="Active" fill={COLORS.blue} radius={[4, 4, 0, 0]} animationDuration={1000} />
+                      <Bar dataKey="Available" fill={COLORS.green} radius={[4, 4, 0, 0]} animationDuration={1200} />
+                      <Bar dataKey="Completed" fill={COLORS.purple} radius={[4, 4, 0, 0]} animationDuration={1200} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Trip Status PieChart */}
+              {tripStatusData.length > 0 && (
+                <div className="chart-card">
+                  <h3 className="chart-title">🗺️ Trip Status Overview</h3>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={tripStatusData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={4}
+                        dataKey="value"
+                        animationBegin={200}
+                        animationDuration={1000}
+                      >
+                        {tripStatusData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(255,255,255,0.1)" />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend
+                        verticalAlign="bottom"
+                        height={36}
+                        formatter={(value) => <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{value}</span>}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Fleet Utilization Gauge */}
+              {kpis && (
+                <div className="chart-card">
+                  <h3 className="chart-title">📊 Fleet Utilization Rate</h3>
+                  <div className="utilization-display">
+                    <div className="utilization-ring">
+                      <svg viewBox="0 0 120 120" className="utilization-svg">
+                        <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+                        <circle
+                          cx="60" cy="60" r="52" fill="none"
+                          stroke={COLORS.orange}
+                          strokeWidth="10"
+                          strokeDasharray={`${2 * Math.PI * 52}`}
+                          strokeDashoffset={`${2 * Math.PI * 52 * (1 - (kpis.fleet_utilization || 0) / 100)}`}
+                          strokeLinecap="round"
+                          transform="rotate(-90 60 60)"
+                          style={{ transition: 'stroke-dashoffset 1.5s ease-in-out' }}
+                        />
+                        <text x="60" y="56" textAnchor="middle" fill="var(--text-primary)" fontSize="24" fontWeight="bold">
+                          {kpis.fleet_utilization}%
+                        </text>
+                        <text x="60" y="74" textAnchor="middle" fill="var(--text-muted)" fontSize="10">
+                          Utilization
+                        </text>
+                      </svg>
+                    </div>
+                    <div className="utilization-details">
+                      <div className="utilization-item">
+                        <span className="utilization-dot" style={{ background: COLORS.orange }} />
+                        <span>Active: {kpis.active_vehicles} vehicles</span>
+                      </div>
+                      <div className="utilization-item">
+                        <span className="utilization-dot" style={{ background: COLORS.green }} />
+                        <span>Available: {kpis.available_vehicles} vehicles</span>
+                      </div>
+                      <div className="utilization-item">
+                        <span className="utilization-dot" style={{ background: COLORS.red }} />
+                        <span>In Shop: {kpis.vehicles_in_maintenance} vehicles</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="section-title" style={{ marginTop: '8px' }}>
             📋 Recent Activity
           </div>
           <div className="activity-list">

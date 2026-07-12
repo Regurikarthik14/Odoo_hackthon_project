@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, FuelLog, Expense, Vehicle
 from middleware.auth import role_required
 
@@ -11,8 +11,9 @@ expenses_bp = Blueprint('expenses', __name__, url_prefix='/api/expenses')
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def get_fuel_logs():
+    current_user_id = int(get_jwt_identity())
     vehicle_id = request.args.get('vehicle_id')
-    query = FuelLog.query
+    query = FuelLog.query.filter_by(created_by=current_user_id)
     if vehicle_id:
         query = query.filter_by(vehicle_id=int(vehicle_id))
     logs = query.order_by(FuelLog.date.desc()).all()
@@ -23,6 +24,7 @@ def get_fuel_logs():
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def add_fuel_log():
+    current_user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -37,7 +39,8 @@ def add_fuel_log():
         liters=data.get('liters', 0),
         cost=data.get('cost', 0),
         notes=data.get('notes', ''),
-        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow()
+        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow(),
+        created_by=current_user_id
     )
     db.session.add(log)
     db.session.commit()
@@ -48,7 +51,8 @@ def add_fuel_log():
 @jwt_required()
 @role_required('fleet_manager')
 def delete_fuel_log(log_id):
-    log = FuelLog.query.get_or_404(log_id)
+    current_user_id = int(get_jwt_identity())
+    log = FuelLog.query.filter_by(id=log_id, created_by=current_user_id).first_or_404()
     db.session.delete(log)
     db.session.commit()
     return jsonify({'message': 'Fuel log deleted'}), 200
@@ -59,9 +63,10 @@ def delete_fuel_log(log_id):
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def get_other_expenses():
+    current_user_id = int(get_jwt_identity())
     vehicle_id = request.args.get('vehicle_id')
     expense_type = request.args.get('expense_type')
-    query = Expense.query
+    query = Expense.query.filter_by(created_by=current_user_id)
     if vehicle_id:
         query = query.filter_by(vehicle_id=int(vehicle_id))
     if expense_type:
@@ -74,6 +79,7 @@ def get_other_expenses():
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def add_expense():
+    current_user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -88,7 +94,8 @@ def add_expense():
         expense_type=data.get('expense_type', 'other'),
         amount=data.get('amount', 0),
         description=data.get('description', ''),
-        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow()
+        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow(),
+        created_by=current_user_id
     )
     db.session.add(expense)
     db.session.commit()
@@ -99,7 +106,8 @@ def add_expense():
 @jwt_required()
 @role_required('fleet_manager')
 def delete_expense(expense_id):
-    expense = Expense.query.get_or_404(expense_id)
+    current_user_id = int(get_jwt_identity())
+    expense = Expense.query.filter_by(id=expense_id, created_by=current_user_id).first_or_404()
     db.session.delete(expense)
     db.session.commit()
     return jsonify({'message': 'Expense deleted'}), 200

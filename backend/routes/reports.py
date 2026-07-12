@@ -1,7 +1,7 @@
 import csv
 from io import StringIO
 from flask import Blueprint, request, jsonify, Response
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, Vehicle, Trip, FuelLog, Expense, MaintenanceRecord
 from middleware.auth import role_required
 from sqlalchemy import func
@@ -13,15 +13,18 @@ reports_bp = Blueprint('reports', __name__, url_prefix='/api/reports')
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def get_report_summary():
+    current_user_id = int(get_jwt_identity())
     vehicle_id = request.args.get('vehicle_id')
 
-    # Build aggregate queries
-    total_fuel = db.session.query(func.sum(FuelLog.liters))
+    # Build aggregate queries with user filtering
+    total_fuel = db.session.query(func.sum(FuelLog.liters)).filter(FuelLog.created_by == current_user_id)
     if vehicle_id:
         total_fuel = total_fuel.filter(FuelLog.vehicle_id == int(vehicle_id))
     total_fuel = total_fuel.scalar() or 0
 
-    total_distance = db.session.query(func.sum(Trip.actual_distance)).filter(Trip.status == 'completed')
+    total_distance = db.session.query(func.sum(Trip.actual_distance)).filter(
+        Trip.status == 'completed', Trip.created_by == current_user_id
+    )
     if vehicle_id:
         total_distance = total_distance.filter(Trip.vehicle_id == int(vehicle_id))
     total_distance = total_distance.scalar() or 0
@@ -29,38 +32,42 @@ def get_report_summary():
     fuel_efficiency = round(total_distance / total_fuel, 2) if total_fuel > 0 else 0
 
     # Costs
-    total_fuel_cost = db.session.query(func.sum(FuelLog.cost))
+    total_fuel_cost = db.session.query(func.sum(FuelLog.cost)).filter(FuelLog.created_by == current_user_id)
     if vehicle_id:
         total_fuel_cost = total_fuel_cost.filter(FuelLog.vehicle_id == int(vehicle_id))
     total_fuel_cost = total_fuel_cost.scalar() or 0
 
-    total_maint_cost = db.session.query(func.sum(MaintenanceRecord.cost)).filter(MaintenanceRecord.status == 'closed')
+    total_maint_cost = db.session.query(func.sum(MaintenanceRecord.cost)).filter(
+        MaintenanceRecord.status == 'closed',
+        MaintenanceRecord.created_by == current_user_id
+    )
     if vehicle_id:
         total_maint_cost = total_maint_cost.filter(MaintenanceRecord.vehicle_id == int(vehicle_id))
     total_maint_cost = total_maint_cost.scalar() or 0
 
-    total_other_expenses = db.session.query(func.sum(Expense.amount))
+    total_other_expenses = db.session.query(func.sum(Expense.amount)).filter(Expense.created_by == current_user_id)
     if vehicle_id:
         total_other_expenses = total_other_expenses.filter(Expense.vehicle_id == int(vehicle_id))
     total_other_expenses = total_other_expenses.scalar() or 0
 
     total_operational_cost = total_fuel_cost + total_maint_cost + total_other_expenses
 
-    # Fleet utilization
-    total_vehicles = Vehicle.query.count()
-    active_vehicles = Vehicle.query.filter_by(status='on_trip').count()
+    # Fleet utilization - only user's vehicles
+    total_vehicles = Vehicle.query.filter_by(created_by=current_user_id).count()
+    active_vehicles = Vehicle.query.filter_by(created_by=current_user_id, status='on_trip').count()
     fleet_utilization = round((active_vehicles / total_vehicles * 100), 1) if total_vehicles > 0 else 0
 
     per_vehicle_data = []
     if not vehicle_id:
-        vehicles = Vehicle.query.all()
+        vehicles = Vehicle.query.filter_by(created_by=current_user_id).all()
         for v in vehicles:
-            v_fuel = db.session.query(func.sum(FuelLog.cost)).filter_by(vehicle_id=v.id).scalar() or 0
+            v_fuel = db.session.query(func.sum(FuelLog.cost)).filter_by(vehicle_id=v.id, created_by=current_user_id).scalar() or 0
             v_maint = db.session.query(func.sum(MaintenanceRecord.cost)).filter(
                 MaintenanceRecord.vehicle_id == v.id,
+                MaintenanceRecord.created_by == current_user_id,
                 MaintenanceRecord.status == 'closed'
             ).scalar() or 0
-            v_trips = Trip.query.filter_by(vehicle_id=v.id, status='completed').count()
+            v_trips = Trip.query.filter_by(vehicle_id=v.id, created_by=current_user_id, status='completed').count()
 
             revenue = v_trips * 500  # estimated revenue per trip
             total_cost = v_fuel + v_maint
@@ -97,10 +104,11 @@ def get_report_summary():
 @jwt_required()
 @role_required('fleet_manager', 'financial_analyst')
 def export_csv():
+    current_user_id = int(get_jwt_identity())
     report_type = request.args.get('type', 'vehicles')
 
     if report_type == 'vehicles':
-        vehicles = Vehicle.query.all()
+        vehicles = Vehicle.query.filter_by(created_by=current_user_id).all()
         output = StringIO()
         writer = csv.writer(output)
         writer.writerow(['ID', 'Registration', 'Name', 'Model', 'Type', 'Max Load (kg)',
@@ -111,7 +119,7 @@ def export_csv():
         csv_content = output.getvalue()
 
     elif report_type == 'trips':
-        trips = Trip.query.order_by(Trip.created_at.desc()).all()
+        trips = Trip.query.filter_by(created_by=current_user_id).order_by(Trip.created_at.desc()).all()
         output = StringIO()
         writer = csv.writer(output)
         writer.writerow(['ID', 'Source', 'Destination', 'Cargo (kg)', 'Distance (km)',
@@ -127,7 +135,7 @@ def export_csv():
         csv_content = output.getvalue()
 
     elif report_type == 'expenses':
-        expenses = Expense.query.order_by(Expense.date.desc()).all()
+        expenses = Expense.query.filter_by(created_by=current_user_id).order_by(Expense.date.desc()).all()
         output = StringIO()
         writer = csv.writer(output)
         writer.writerow(['ID', 'Vehicle', 'Type', 'Amount ($)', 'Date', 'Description'])

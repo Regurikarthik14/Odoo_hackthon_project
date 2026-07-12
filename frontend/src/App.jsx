@@ -11,6 +11,7 @@ import Trips from './pages/Trips';
 import Maintenance from './pages/Maintenance';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
+import Members from './pages/Members';
 
 // Role-based page access map
 const PAGE_ROLES = {
@@ -21,6 +22,7 @@ const PAGE_ROLES = {
   '/maintenance': ['fleet_manager'],
   '/expenses': ['fleet_manager', 'financial_analyst'],
   '/reports': ['fleet_manager', 'financial_analyst'],
+  '/members': ['fleet_manager', 'driver', 'safety_officer', 'financial_analyst'],
 };
 
 export default function App() {
@@ -91,6 +93,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={PAGE_ROLES['/reports']}>
               <Reports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/members"
+          element={
+            <ProtectedRoute roles={PAGE_ROLES['/members']}>
+              <Members />
             </ProtectedRoute>
           }
         />

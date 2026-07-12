@@ -16,6 +16,7 @@ class Vehicle(db.Model):
     status = db.Column(db.String(20), default='available')
     # statuses: available, on_trip, in_shop, retired
     region = db.Column(db.String(50), default='unknown')
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -35,6 +36,7 @@ class Vehicle(db.Model):
             'acquisition_cost': self.acquisition_cost,
             'status': self.status,
             'region': self.region,
+            'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

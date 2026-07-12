@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime
 from models import db, MaintenanceRecord, Vehicle
 from middleware.auth import role_required
@@ -10,9 +10,10 @@ maintenance_bp = Blueprint('maintenance', __name__, url_prefix='/api/maintenance
 @maintenance_bp.route('', methods=['GET'])
 @jwt_required()
 def get_maintenance_records():
+    current_user_id = int(get_jwt_identity())
     status = request.args.get('status')
     vehicle_id = request.args.get('vehicle_id')
-    query = MaintenanceRecord.query
+    query = MaintenanceRecord.query.filter_by(created_by=current_user_id)
     if status:
         query = query.filter_by(status=status)
     if vehicle_id:
@@ -24,14 +25,16 @@ def get_maintenance_records():
 @maintenance_bp.route('/active', methods=['GET'])
 @jwt_required()
 def get_active_maintenance():
-    records = MaintenanceRecord.query.filter_by(status='active').all()
+    current_user_id = int(get_jwt_identity())
+    records = MaintenanceRecord.query.filter_by(status='active', created_by=current_user_id).all()
     return jsonify([r.to_dict() for r in records]), 200
 
 
 @maintenance_bp.route('/<int:record_id>', methods=['GET'])
 @jwt_required()
 def get_maintenance_record(record_id):
-    record = MaintenanceRecord.query.get_or_404(record_id)
+    current_user_id = int(get_jwt_identity())
+    record = MaintenanceRecord.query.filter_by(id=record_id, created_by=current_user_id).first_or_404()
     return jsonify(record.to_dict()), 200
 
 
@@ -39,6 +42,7 @@ def get_maintenance_record(record_id):
 @jwt_required()
 @role_required('fleet_manager')
 def create_maintenance_record():
+    current_user_id = int(get_jwt_identity())
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -57,7 +61,8 @@ def create_maintenance_record():
         maintenance_type=data.get('maintenance_type', 'Other'),
         cost=data.get('cost', 0),
         notes=data.get('notes', ''),
-        status='active'
+        status='active',
+        created_by=current_user_id
     )
 
     # Auto-change vehicle status to in_shop
@@ -72,7 +77,8 @@ def create_maintenance_record():
 @jwt_required()
 @role_required('fleet_manager')
 def close_maintenance(record_id):
-    record = MaintenanceRecord.query.get_or_404(record_id)
+    current_user_id = int(get_jwt_identity())
+    record = MaintenanceRecord.query.filter_by(id=record_id, created_by=current_user_id).first_or_404()
 
     if record.status != 'active':
         return jsonify({'error': 'Maintenance record is not active'}), 400
@@ -93,7 +99,8 @@ def close_maintenance(record_id):
 @jwt_required()
 @role_required('fleet_manager')
 def update_maintenance_record(record_id):
-    record = MaintenanceRecord.query.get_or_404(record_id)
+    current_user_id = int(get_jwt_identity())
+    record = MaintenanceRecord.query.filter_by(id=record_id, created_by=current_user_id).first_or_404()
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -110,7 +117,8 @@ def update_maintenance_record(record_id):
 @jwt_required()
 @role_required('fleet_manager')
 def delete_maintenance_record(record_id):
-    record = MaintenanceRecord.query.get_or_404(record_id)
+    current_user_id = int(get_jwt_identity())
+    record = MaintenanceRecord.query.filter_by(id=record_id, created_by=current_user_id).first_or_404()
     db.session.delete(record)
     db.session.commit()
     return jsonify({'message': 'Maintenance record deleted'}), 200

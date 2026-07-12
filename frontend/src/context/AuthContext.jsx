@@ -30,6 +30,39 @@ export function AuthProvider({ children }) {
     return userData;
   };
 
+  const loginWithMobile = async (mobile, password) => {
+    const res = await api.post('/auth/login', { mobile, password });
+    const { token, user: userData } = res.data;
+    localStorage.setItem('oddo_token', token);
+    localStorage.setItem('oddo_user', JSON.stringify(userData));
+    setUser(userData);
+    return userData;
+  };
+
+  const checkAvailability = async (field, value) => {
+    const res = await api.post('/auth/check-availability', { field, value });
+    return res.data.available;
+  };
+
+  const sendOtp = async (mobile) => {
+    const res = await api.post('/auth/send-otp', { mobile });
+    return res.data;
+  };
+
+  const verifyOtp = async (mobile, otp) => {
+    const res = await api.post('/auth/verify-otp', { mobile, otp });
+    return res.data.verified;
+  };
+
+  const register = async (userData) => {
+    const res = await api.post('/auth/register', userData);
+    const { token, user: userData_ } = res.data;
+    localStorage.setItem('oddo_token', token);
+    localStorage.setItem('oddo_user', JSON.stringify(userData_));
+    setUser(userData_);
+    return userData_;
+  };
+
   const logout = () => {
     localStorage.removeItem('oddo_token');
     localStorage.removeItem('oddo_user');
@@ -41,7 +74,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasRole }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithMobile, register, checkAvailability, sendOtp, verifyOtp, logout, hasRole }}>
       {children}
     </AuthContext.Provider>
   );
