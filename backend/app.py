@@ -45,10 +45,9 @@ def create_app():
 
     return app
 
-# 1. EXPORT GLOBALLY FOR VERCEL (No indentation)
+# Vercel needs a top-level app instance
 app = create_app()
 
-# 2. KEEP THIS FOR LOCAL DEVELOPMENT ONLY
 if __name__ == '__main__':
     print('ODDO Fleet Management API starting...')
     print('   http://localhost:5000')
