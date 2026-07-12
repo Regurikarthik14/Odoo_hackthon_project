@@ -491,4 +491,4 @@ Test Coverage: 85%+
 
 Built with ❤️ for the Odoo Hackathon
 
-**Last Updated:** 2024
+**Last Updated:** 2026
