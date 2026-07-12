@@ -3,7 +3,7 @@
 Welcome to the **Odoo Hackathon Project**! 🚀 This is a full-stack web application built as part of the Odoo Hackathon competition.
 
 ## 🌐 Live Demo
-Visit the live application here: [https://odoo-hackthon-project.vercel.app](https://odoo-hackthon-project.vercel.app)
+Visit the live application here: http://localhost:5173/dashboard
 
 ## 📋 Project Overview
 
