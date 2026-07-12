@@ -1,298 +1,210 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { driverService } from '../services';
+import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
-import { getDrivers, createDriver, updateDriver, deleteDriver } from '../services/api';
-
-const STATUSES = ['All', 'available', 'on-trip', 'off-duty', 'suspended'];
+import toast from 'react-hot-toast';
+import './TablePage.css';
 
 export default function Drivers() {
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('manage-drivers');
-
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [showModal, setShowModal] = useState(false);
-  const [editingDriver, setEditingDriver] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editDriver, setEditDriver] = useState(null);
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('fleet_manager', 'safety_officer');
 
   const [form, setForm] = useState({
-    name: '',
-    licenseNumber: '',
-    licenseCategory: 'Class B',
-    licenseExpiry: '',
-    contact: '',
+    name: '', license_number: '', license_category: 'B',
+    license_expiry_date: '', contact_number: '', safety_score: 100, status: 'available'
   });
 
-  const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
+  useEffect(() => { loadDrivers(); }, []);
 
-  const loadDrivers = useCallback(async () => {
+  const loadDrivers = async () => {
     try {
-      const filters = {};
-      if (statusFilter !== 'All') filters.status = statusFilter;
-      if (search) filters.search = search;
-      const data = await getDrivers(filters);
-      setDrivers(data);
+      const res = await driverService.getAll();
+      setDrivers(res.data);
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Failed to load drivers');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, search, showToast]);
-
-  useEffect(() => {
-    setLoading(true);
-    const debounce = setTimeout(loadDrivers, 300);
-    return () => clearTimeout(debounce);
-  }, [loadDrivers]);
-
-  const openCreateModal = () => {
-    setEditingDriver(null);
-    setForm({ name: '', licenseNumber: '', licenseCategory: 'Class B', licenseExpiry: '', contact: '' });
-    setShowModal(true);
   };
 
-  const openEditModal = (driver) => {
-    setEditingDriver(driver);
+  const openCreate = () => {
+    setForm({ name: '', license_number: '', license_category: 'B',
+      license_expiry_date: '', contact_number: '', safety_score: 100, status: 'available' });
+    setEditDriver(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (d) => {
     setForm({
-      name: driver.name,
-      licenseNumber: driver.licenseNumber,
-      licenseCategory: driver.licenseCategory,
-      licenseExpiry: driver.licenseExpiry,
-      contact: driver.contact,
+      name: d.name, license_number: d.license_number, license_category: d.license_category,
+      license_expiry_date: d.license_expiry_date?.split('T')[0] || '', contact_number: d.contact_number || '',
+      safety_score: d.safety_score, status: d.status
     });
-    setShowModal(true);
+    setEditDriver(d);
+    setShowForm(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
     try {
-      if (editingDriver) {
-        await updateDriver(editingDriver.id, form);
-        showToast('Driver updated successfully');
+      if (editDriver) {
+        await driverService.update(editDriver.id, form);
+        toast.success('Driver updated');
       } else {
-        await createDriver(form);
-        showToast('Driver created successfully');
+        await driverService.create(form);
+        toast.success('Driver created');
       }
-      setShowModal(false);
+      setShowForm(false);
       loadDrivers();
     } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setSaving(false);
+      toast.error(err.response?.data?.error || 'Operation failed');
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this driver?')) return;
+    if (!confirm('Delete this driver?')) return;
     try {
-      await deleteDriver(id);
-      showToast('Driver deleted');
+      await driverService.delete(id);
+      toast.success('Driver deleted');
       loadDrivers();
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Delete failed');
     }
   };
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
+  if (loading) return <LoadingSpinner fullScreen text="Loading drivers..." />;
 
-  const isLicenseExpired = (expiry) => new Date(expiry) < new Date();
-  const getSafetyScoreColor = (score) => {
-    if (score >= 90) return { color: '#10b981', bg: '#d1fae5' };
-    if (score >= 75) return { color: '#f59e0b', bg: '#fef3c7' };
-    return { color: '#ef4444', bg: '#fee2e2' };
-  };
-
-  const getStatusBadgeClass = (status) => {
-    const map = {
-      'available': 'available',
-      'on-trip': 'on-trip',
-      'off-duty': 'off-duty',
-      'suspended': 'suspended',
-    };
-    return map[status] || 'available';
+  const isExpired = (dateStr) => {
+    if (!dateStr) return false;
+    return new Date(dateStr) < new Date();
   };
 
   return (
-    <div>
-      {toast && (
-        <div className="toast-container">
-          <div className={`toast ${toast.type}`}>
-            {toast.type === 'success' ? '✅' : '❌'} {toast.message}
-          </div>
-        </div>
-      )}
-
+    <div className="page-container">
       <div className="page-header">
         <div>
-          <h1>👤 Driver Management</h1>
-          <p>Manage driver profiles, licenses, and compliance.</p>
+          <h1 className="page-title">👤 Driver Management</h1>
+          <p className="page-subtitle">Manage drivers, licenses, and safety scores</p>
         </div>
-        {canManage && (
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + Add Driver
-          </button>
-        )}
+        {canEdit && <button className="btn-primary" onClick={openCreate}>+ Add Driver</button>}
       </div>
 
-      <div className="filters-bar">
-        <div className="search-wrapper">
-          <span className="search-icon">🔍</span>
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Search drivers..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <select
-          className="filter-select"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>License #</th>
-              <th>Category</th>
-              <th>License Expiry</th>
-              <th>Contact</th>
-              <th>Safety Score</th>
-              <th>Status</th>
-              {canManage && <th>Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center text-muted" style={{ padding: 40 }}>
-                  ⏳ Loading drivers...
-                </td>
-              </tr>
-            ) : drivers.length === 0 ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center" style={{ padding: 40 }}>
-                  <div className="empty-state">
-                    <div className="empty-state-icon">👤</div>
-                    <h3>No drivers found</h3>
-                    <p>Try adjusting your filters or add a new driver.</p>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              drivers.map((driver) => {
-                const expired = isLicenseExpired(driver.licenseExpiry);
-                const scoreStyle = getSafetyScoreColor(driver.safetyScore);
-                return (
-                  <tr key={driver.id}>
-                    <td><strong>{driver.name}</strong></td>
-                    <td>{driver.licenseNumber}</td>
-                    <td>{driver.licenseCategory}</td>
-                    <td>
-                      <span style={{ color: expired ? '#ef4444' : '#10b981', fontWeight: 600 }}>
-                        {driver.licenseExpiry}
-                        {expired && ' ⚠️'}
-                      </span>
-                    </td>
-                    <td>{driver.contact}</td>
-                    <td>
-                      <span style={{
-                        background: scoreStyle.bg,
-                        color: scoreStyle.color,
-                        padding: '2px 10px',
-                        borderRadius: 12,
-                        fontWeight: 600,
-                        fontSize: 13,
-                      }}>
-                        {driver.safetyScore}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`status-badge ${getStatusBadgeClass(driver.status)}`}>
-                        {driver.status.replace('-', ' ')}
-                      </span>
-                    </td>
-                    {canManage && (
-                      <td>
-                        <div className="flex gap-2">
-                          <button className="btn btn-secondary btn-sm" onClick={() => openEditModal(driver)} title="Edit">✏️</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(driver.id)} title="Delete" disabled={driver.status === 'on-trip'}>🗑️</button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Create/Edit Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{editingDriver ? '✏️ Edit Driver' : '👤 Add New Driver'}</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <form onSubmit={handleSubmit}>
-              <div className="modal-body">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Full Name *</label>
-                    <input type="text" className="form-control" name="name" value={form.name} onChange={handleChange} placeholder="e.g., John Doe" required />
-                  </div>
-                  <div className="form-group">
-                    <label>Contact Number *</label>
-                    <input type="text" className="form-control" name="contact" value={form.contact} onChange={handleChange} placeholder="e.g., +1-555-0100" required />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>License Number *</label>
-                    <input type="text" className="form-control" name="licenseNumber" value={form.licenseNumber} onChange={handleChange} placeholder="e.g., DL-48291" required />
-                  </div>
-                  <div className="form-group">
-                    <label>License Category</label>
-                    <select className="form-control" name="licenseCategory" value={form.licenseCategory} onChange={handleChange}>
-                      <option value="Class A">Class A</option>
-                      <option value="Class B">Class B</option>
-                      <option value="Class C">Class C</option>
-                    </select>
-                  </div>
+      {showForm && (
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">{editDriver ? 'Edit Driver' : 'Add Driver'}</h2>
+            <form onSubmit={handleSubmit} className="modal-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Name *</label>
+                  <input className="form-input" value={form.name}
+                    onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} required />
                 </div>
                 <div className="form-group">
-                  <label>License Expiry Date *</label>
-                  <input type="date" className="form-control" name="licenseExpiry" value={form.licenseExpiry} onChange={handleChange} required />
+                  <label>License Number *</label>
+                  <input className="form-input" value={form.license_number}
+                    onChange={(e) => setForm(f => ({ ...f, license_number: e.target.value }))} required />
                 </div>
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Saving...' : editingDriver ? 'Update Driver' : 'Add Driver'}
-                </button>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>License Category</label>
+                  <select className="form-input" value={form.license_category}
+                    onChange={(e) => setForm(f => ({ ...f, license_category: e.target.value }))}>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="D">D</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>License Expiry *</label>
+                  <input type="date" className="form-input" value={form.license_expiry_date}
+                    onChange={(e) => setForm(f => ({ ...f, license_expiry_date: e.target.value }))} required />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Contact</label>
+                  <input className="form-input" value={form.contact_number}
+                    onChange={(e) => setForm(f => ({ ...f, contact_number: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label>Safety Score</label>
+                  <input type="number" className="form-input" value={form.safety_score}
+                    onChange={(e) => setForm(f => ({ ...f, safety_score: e.target.value }))} min="0" max="100" />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Status</label>
+                  <select className="form-input" value={form.status}
+                    onChange={(e) => setForm(f => ({ ...f, status: e.target.value }))}>
+                    <option value="available">Available</option>
+                    <option value="off_duty">Off Duty</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn-primary">{editDriver ? 'Update' : 'Create'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      <div className="table-wrapper">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>License #</th>
+              <th>Category</th>
+              <th>Expiry</th>
+              <th>Contact</th>
+              <th>Safety Score</th>
+              <th>Status</th>
+              {canEdit && <th>Actions</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {drivers.length === 0 ? (
+              <tr><td colSpan={canEdit ? 8 : 7} className="empty-state">No drivers registered yet</td></tr>
+            ) : drivers.map((d) => (
+              <tr key={d.id} className={isExpired(d.license_expiry_date) ? 'row-warning' : ''}>
+                <td><strong>{d.name}</strong></td>
+                <td>{d.license_number}</td>
+                <td>{d.license_category}</td>
+                <td>
+                  {d.license_expiry_date?.split('T')[0] || 'N/A'}
+                  {isExpired(d.license_expiry_date) && <span className="expired-badge">Expired</span>}
+                </td>
+                <td>{d.contact_number || '—'}</td>
+                <td>
+                  <span className={`safety-score ${d.safety_score >= 90 ? 'high' : d.safety_score >= 70 ? 'mid' : 'low'}`}>
+                    {d.safety_score}
+                  </span>
+                </td>
+                <td><span className={`status-badge status-${d.status}`}>{d.status.replace('_', ' ')}</span></td>
+                {canEdit && (
+                  <td>
+                    <div className="action-btns">
+                      <button className="btn-icon" onClick={() => openEdit(d)} title="Edit">✏️</button>
+                      <button className="btn-icon" onClick={() => handleDelete(d.id)} title="Delete">🗑️</button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

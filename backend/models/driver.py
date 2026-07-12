@@ -1,40 +1,44 @@
-from models.db import db
 from datetime import datetime
+from . import db
+
 
 class Driver(db.Model):
     __tablename__ = 'drivers'
 
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    license_number = db.Column(db.String(50), unique=True, nullable=False)
-    phone = db.Column(db.String(20), nullable=False)
-    address = db.Column(db.Text, nullable=True)
-    emergency_contact = db.Column(db.String(100), nullable=True)
-    emergency_phone = db.Column(db.String(20), nullable=True)
-    license_expiry = db.Column(db.Date, nullable=False)
-    medical_expiry = db.Column(db.Date, nullable=True)
-    safety_score = db.Column(db.Numeric(5, 2), default=100.00)
-    status = db.Column(db.Enum('available', 'on-trip', 'off-duty', 'suspended'), nullable=False, default='available')
-    assigned_vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=True)
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    license_number = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    license_category = db.Column(db.String(20), default='B')
+    license_expiry_date = db.Column(db.Date, nullable=False)
+    contact_number = db.Column(db.String(20))
+    safety_score = db.Column(db.Float, default=100.0)
+    status = db.Column(db.String(20), default='available')
+    # statuses: available, on_trip, off_duty, suspended
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    user = db.relationship('User', backref='driver', lazy=True)
-    assigned_vehicle = db.relationship('Vehicle', backref='assigned_drivers', lazy=True)
+    trips = db.relationship('Trip', backref='driver', lazy='dynamic')
 
     def to_dict(self):
         return {
             'id': self.id,
-            'user_id': self.user_id,
-            'phone': self.phone,
-            'address': self.address,
+            'name': self.name,
             'license_number': self.license_number,
-            'emergency_contact': self.emergency_contact,
-            'emergency_phone': self.emergency_phone,
-            'license_expiry': self.license_expiry.isoformat() if self.license_expiry else None,
-            'medical_expiry': self.medical_expiry.isoformat() if self.medical_expiry else None,
-            'safety_score': float(self.safety_score) if self.safety_score else None,
+            'license_category': self.license_category,
+            'license_expiry_date': self.license_expiry_date.isoformat() if self.license_expiry_date else None,
+            'contact_number': self.contact_number,
+            'safety_score': self.safety_score,
             'status': self.status,
-            'assigned_vehicle_id': self.assigned_vehicle_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+    def is_available_for_trip(self):
+        from datetime import date
+        if self.status != 'available':
+            return False, 'Driver is not available'
+        if self.status == 'suspended':
+            return False, 'Driver is suspended'
+        if self.license_expiry_date and self.license_expiry_date < date.today():
+            return False, 'License has expired'
+        return True, 'Driver is available'

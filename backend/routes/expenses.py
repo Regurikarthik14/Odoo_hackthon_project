@@ -1,78 +1,105 @@
 from flask import Blueprint, request, jsonify
-from models.expense import Expense
-from models.db import db
-from middleware.auth_middleware import jwt_required
-from datetime import datetime
+from flask_jwt_extended import jwt_required
+from models import db, FuelLog, Expense, Vehicle
+from middleware.auth import role_required
 
 expenses_bp = Blueprint('expenses', __name__, url_prefix='/api/expenses')
 
-@expenses_bp.route('', methods=['GET'])
-@jwt_required
-def get_expenses():
-    q = Expense.query
-    cat = request.args.get('category')
-    vid = request.args.get('vehicle_id')
-    sd = request.args.get('start_date')
-    ed = request.args.get('end_date')
-    if cat:
-        q = q.filter_by(category=cat)
-    if vid:
-        q = q.filter_by(vehicle_id=int(vid))
-    if sd:
-        q = q.filter(Expense.expense_date >= datetime.strptime(sd, '%Y-%m-%d').date())
-    if ed:
-        q = q.filter(Expense.expense_date <= datetime.strptime(ed, '%Y-%m-%d').date())
-    exps = q.order_by(Expense.expense_date.desc()).all()
-    return jsonify({'expenses': [e.to_dict() for e in exps], 'total': len(exps)}), 200
 
-@expenses_bp.route('/<int:eid>', methods=['GET'])
-@jwt_required
-def get_expense(eid):
-    e = Expense.query.get(eid)
-    if not e:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify({'expense': e.to_dict()}), 200
+# ---- Fuel Logs ----
+@expenses_bp.route('/fuel', methods=['GET'])
+@jwt_required()
+@role_required('fleet_manager', 'financial_analyst')
+def get_fuel_logs():
+    vehicle_id = request.args.get('vehicle_id')
+    query = FuelLog.query
+    if vehicle_id:
+        query = query.filter_by(vehicle_id=int(vehicle_id))
+    logs = query.order_by(FuelLog.date.desc()).all()
+    return jsonify([l.to_dict() for l in logs]), 200
 
-@expenses_bp.route('', methods=['POST'])
-@jwt_required
-def create_expense():
+
+@expenses_bp.route('/fuel', methods=['POST'])
+@jwt_required()
+@role_required('fleet_manager', 'financial_analyst')
+def add_fuel_log():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for f in ['category', 'amount', 'expense_date']:
-        if not data.get(f):
-            return jsonify({'error': f'Missing: {f}'}), 400
-    e = Expense(vehicle_id=data.get('vehicle_id'), trip_id=data.get('trip_id'), category=data['category'],
-                amount=data['amount'], description=data.get('description'),
-                expense_date=datetime.strptime(data['expense_date'], '%Y-%m-%d').date(),
-                receipt_url=data.get('receipt_url'))
-    db.session.add(e)
-    db.session.commit()
-    return jsonify({'message': 'Created', 'expense': e.to_dict()}), 201
+        return jsonify({'error': 'No data provided'}), 400
 
-@expenses_bp.route('/<int:eid>', methods=['PUT'])
-@jwt_required
-def update_expense(eid):
-    e = Expense.query.get(eid)
-    if not e:
-        return jsonify({'error': 'Not found'}), 404
+    vehicle = Vehicle.query.get(data.get('vehicle_id'))
+    if not vehicle:
+        return jsonify({'error': 'Vehicle not found'}), 404
+
+    from datetime import datetime
+    log = FuelLog(
+        vehicle_id=data['vehicle_id'],
+        liters=data.get('liters', 0),
+        cost=data.get('cost', 0),
+        notes=data.get('notes', ''),
+        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow()
+    )
+    db.session.add(log)
+    db.session.commit()
+    return jsonify(log.to_dict()), 201
+
+
+@expenses_bp.route('/fuel/<int:log_id>', methods=['DELETE'])
+@jwt_required()
+@role_required('fleet_manager')
+def delete_fuel_log(log_id):
+    log = FuelLog.query.get_or_404(log_id)
+    db.session.delete(log)
+    db.session.commit()
+    return jsonify({'message': 'Fuel log deleted'}), 200
+
+
+# ---- Other Expenses ----
+@expenses_bp.route('/other', methods=['GET'])
+@jwt_required()
+@role_required('fleet_manager', 'financial_analyst')
+def get_other_expenses():
+    vehicle_id = request.args.get('vehicle_id')
+    expense_type = request.args.get('expense_type')
+    query = Expense.query
+    if vehicle_id:
+        query = query.filter_by(vehicle_id=int(vehicle_id))
+    if expense_type:
+        query = query.filter_by(expense_type=expense_type)
+    expenses = query.order_by(Expense.date.desc()).all()
+    return jsonify([e.to_dict() for e in expenses]), 200
+
+
+@expenses_bp.route('/other', methods=['POST'])
+@jwt_required()
+@role_required('fleet_manager', 'financial_analyst')
+def add_expense():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for field in ['vehicle_id', 'trip_id', 'category', 'amount', 'description', 'receipt_url']:
-        if field in data:
-            setattr(e, field, data[field])
-    if 'expense_date' in data:
-        e.expense_date = datetime.strptime(data['expense_date'], '%Y-%m-%d').date()
-    db.session.commit()
-    return jsonify({'message': 'Updated', 'expense': e.to_dict()}), 200
+        return jsonify({'error': 'No data provided'}), 400
 
-@expenses_bp.route('/<int:eid>', methods=['DELETE'])
-@jwt_required
-def delete_expense(eid):
-    e = Expense.query.get(eid)
-    if not e:
-        return jsonify({'error': 'Not found'}), 404
-    db.session.delete(e)
+    vehicle = Vehicle.query.get(data.get('vehicle_id'))
+    if not vehicle:
+        return jsonify({'error': 'Vehicle not found'}), 404
+
+    from datetime import datetime
+    expense = Expense(
+        vehicle_id=data['vehicle_id'],
+        expense_type=data.get('expense_type', 'other'),
+        amount=data.get('amount', 0),
+        description=data.get('description', ''),
+        date=datetime.strptime(data['date'], '%Y-%m-%d') if data.get('date') else datetime.utcnow()
+    )
+    db.session.add(expense)
     db.session.commit()
-    return jsonify({'message': 'Deleted'}), 200
+    return jsonify(expense.to_dict()), 201
+
+
+@expenses_bp.route('/other/<int:expense_id>', methods=['DELETE'])
+@jwt_required()
+@role_required('fleet_manager')
+def delete_expense(expense_id):
+    expense = Expense.query.get_or_404(expense_id)
+    db.session.delete(expense)
+    db.session.commit()
+    return jsonify({'message': 'Expense deleted'}), 200

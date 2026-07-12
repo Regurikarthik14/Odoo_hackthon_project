@@ -1,40 +1,24 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import './PageTransition.css';
 
 export default function PageTransition({ children }) {
   const location = useLocation();
-  const [showCar, setShowCar] = useState(false);
-  const prevPath = useRef(location.pathname);
+  const [displayChildren, setDisplayChildren] = useState(children);
+  const [transitionStage, setTransitionStage] = useState('enter');
 
   useEffect(() => {
-    if (prevPath.current !== location.pathname) {
-      setShowCar(true);
-      prevPath.current = location.pathname;
-      const timer = setTimeout(() => setShowCar(false), 900);
-      return () => clearTimeout(timer);
-    }
-  }, [location.pathname]);
-
-  // Pick a random car emoji for variety
-  const cars = ['🚗', '🚙', '🏎️', '🚕', '🚐'];
-  const carRef = useRef(cars[Math.floor(Math.random() * cars.length)]);
+    setTransitionStage('exit');
+    const timeout = setTimeout(() => {
+      setDisplayChildren(children);
+      setTransitionStage('enter');
+    }, 200);
+    return () => clearTimeout(timeout);
+  }, [location.pathname, children]);
 
   return (
-    <>
-      {showCar && (
-        <div className="page-transition-overlay">
-          <div className="car-trail" />
-          <div className="car-animation">
-            {carRef.current}
-          </div>
-          <div className="car-animation car-shadow">
-            🚗
-          </div>
-        </div>
-      )}
-      <div className="page-content" key={location.pathname}>
-        {children}
-      </div>
-    </>
+    <div className={`page-transition page-${transitionStage}`}>
+      {displayChildren}
+    </div>
   );
 }

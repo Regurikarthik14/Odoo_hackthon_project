@@ -1,78 +1,117 @@
 from flask import Blueprint, request, jsonify
-from models.driver import Driver
-from models.db import db
-from middleware.auth_middleware import jwt_required, admin_required
-from datetime import datetime
+from flask_jwt_extended import jwt_required
+from datetime import date
+from models import db, Driver
+from middleware.auth import role_required
 
 drivers_bp = Blueprint('drivers', __name__, url_prefix='/api/drivers')
 
+
 @drivers_bp.route('', methods=['GET'])
-@jwt_required
+@jwt_required()
 def get_drivers():
     status = request.args.get('status')
-    q = Driver.query
+    query = Driver.query
     if status:
-        q = q.filter_by(status=status)
-    ds = q.order_by(Driver.created_at.desc()).all()
-    return jsonify({'drivers': [d.to_dict() for d in ds], 'total': len(ds)}), 200
+        query = query.filter_by(status=status)
+    drivers = query.order_by(Driver.created_at.desc()).all()
+    return jsonify([d.to_dict() for d in drivers]), 200
 
-@drivers_bp.route('/<int:did>', methods=['GET'])
-@jwt_required
-def get_driver(did):
-    d = Driver.query.get(did)
-    if not d:
-        return jsonify({'error': 'Driver not found'}), 404
-    return jsonify({'driver': d.to_dict()}), 200
+
+@drivers_bp.route('/available', methods=['GET'])
+@jwt_required()
+def get_available_drivers():
+    today = date.today()
+    drivers = Driver.query.filter(
+        Driver.status == 'available',
+        Driver.license_expiry_date >= today
+    ).all()
+    return jsonify([d.to_dict() for d in drivers]), 200
+
+
+@drivers_bp.route('/<int:driver_id>', methods=['GET'])
+@jwt_required()
+def get_driver(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
+    return jsonify(driver.to_dict()), 200
+
 
 @drivers_bp.route('', methods=['POST'])
-@admin_required
+@jwt_required()
+@role_required('fleet_manager', 'safety_officer')
 def create_driver():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for f in ['license_number', 'phone', 'license_expiry']:
-        if not data.get(f):
-            return jsonify({'error': f'Missing: {f}'}), 400
-    if Driver.query.filter_by(license_number=data['license_number']).first():
-        return jsonify({'error': 'License number exists'}), 409
-    d = Driver(user_id=data.get('user_id'), license_number=data['license_number'], phone=data['phone'],
-               address=data.get('address'), emergency_contact=data.get('emergency_contact'),
-               emergency_phone=data.get('emergency_phone'),
-               license_expiry=datetime.strptime(data['license_expiry'], '%Y-%m-%d').date(),
-               medical_expiry=datetime.strptime(data['medical_expiry'], '%Y-%m-%d').date() if data.get('medical_expiry') else None,
-               safety_score=data.get('safety_score', 100.00), status=data.get('status', 'available'),
-               assigned_vehicle_id=data.get('assigned_vehicle_id'))
-    db.session.add(d)
-    db.session.commit()
-    return jsonify({'message': 'Created', 'driver': d.to_dict()}), 201
+        return jsonify({'error': 'No data provided'}), 400
 
-@drivers_bp.route('/<int:did>', methods=['PUT'])
-@admin_required
-def update_driver(did):
-    d = Driver.query.get(did)
-    if not d:
-        return jsonify({'error': 'Not found'}), 404
+    license_num = data.get('license_number', '').strip()
+    if not license_num:
+        return jsonify({'error': 'License number is required'}), 400
+
+    if Driver.query.filter_by(license_number=license_num).first():
+        return jsonify({'error': 'Driver with this license number already exists'}), 409
+
+    from datetime import datetime
+    expiry_str = data.get('license_expiry_date')
+    expiry_date = None
+    if expiry_str:
+        try:
+            expiry_date = datetime.strptime(expiry_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    driver = Driver(
+        name=data.get('name', ''),
+        license_number=license_num,
+        license_category=data.get('license_category', 'B'),
+        license_expiry_date=expiry_date,
+        contact_number=data.get('contact_number', ''),
+        safety_score=data.get('safety_score', 100.0),
+        status=data.get('status', 'available')
+    )
+    db.session.add(driver)
+    db.session.commit()
+    return jsonify(driver.to_dict()), 201
+
+
+@drivers_bp.route('/<int:driver_id>', methods=['PUT'])
+@jwt_required()
+@role_required('fleet_manager', 'safety_officer')
+def update_driver(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for field in ['user_id', 'phone', 'address', 'emergency_contact', 'emergency_phone', 'safety_score', 'status', 'assigned_vehicle_id']:
-        if field in data:
-            setattr(d, field, data[field])
-    if 'license_number' in data:
-        d.license_number = data['license_number']
-    if 'license_expiry' in data:
-        d.license_expiry = datetime.strptime(data['license_expiry'], '%Y-%m-%d').date()
-    if 'medical_expiry' in data:
-        d.medical_expiry = datetime.strptime(data['medical_expiry'], '%Y-%m-%d').date() if data['medical_expiry'] else None
-    db.session.commit()
-    return jsonify({'message': 'Updated', 'driver': d.to_dict()}), 200
+        return jsonify({'error': 'No data provided'}), 400
 
-@drivers_bp.route('/<int:did>', methods=['DELETE'])
-@admin_required
-def delete_driver(did):
-    d = Driver.query.get(did)
-    if not d:
-        return jsonify({'error': 'Not found'}), 404
-    db.session.delete(d)
+    if 'license_number' in data:
+        new_license = data['license_number'].strip()
+        existing = Driver.query.filter_by(license_number=new_license).first()
+        if existing and existing.id != driver_id:
+            return jsonify({'error': 'License number already in use'}), 409
+        driver.license_number = new_license
+
+    from datetime import datetime
+    for field in ['name', 'license_category', 'contact_number', 'safety_score', 'status']:
+        if field in data:
+            setattr(driver, field, data[field])
+
+    if 'license_expiry_date' in data and data['license_expiry_date']:
+        try:
+            driver.license_expiry_date = datetime.strptime(
+                data['license_expiry_date'], '%Y-%m-%d'
+            ).date()
+        except ValueError:
+            return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
     db.session.commit()
-    return jsonify({'message': 'Deleted'}), 200
+    return jsonify(driver.to_dict()), 200
+
+
+@drivers_bp.route('/<int:driver_id>', methods=['DELETE'])
+@jwt_required()
+@role_required('fleet_manager')
+def delete_driver(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
+    db.session.delete(driver)
+    db.session.commit()
+    return jsonify({'message': 'Driver deleted successfully'}), 200

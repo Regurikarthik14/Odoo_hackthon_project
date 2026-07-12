@@ -1,0 +1,110 @@
+.car-animation-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10000;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.car-track {
+  position: absolute;
+  bottom: 30px;
+  animation: driveAcross 1.2s ease-in-out forwards;
+}
+
+.car-body {
+  position: relative;
+  width: 160px;
+  height: 60px;
+}
+
+.car-top {
+  position: absolute;
+  top: -15px;
+  left: 30px;
+  width: 100px;
+  height: 25px;
+  background: var(--accent-red);
+  border-radius: 15px 15px 0 0;
+  z-index: 2;
+}
+
+.car-bottom {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  width: 160px;
+  height: 30px;
+  background: var(--accent-orange);
+  border-radius: 5px 20px 5px 5px;
+  z-index: 1;
+}
+
+.car-window {
+  position: absolute;
+  top: -12px;
+  width: 30px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px 8px 0 0;
+}
+
+.front-window {
+  right: 18px;
+}
+
+.rear-window {
+  left: 18px;
+}
+
+.wheel {
+  position: absolute;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  background: #333;
+  border: 3px solid #666;
+  border-radius: 50%;
+  z-index: 3;
+  animation: wheelSpin 0.4s linear infinite;
+}
+
+.wheel-front {
+  right: 12px;
+}
+
+.wheel-rear {
+  left: 12px;
+}
+
+.wheel::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  background: var(--accent-orange);
+  border-radius: 50%;
+}
+
+@keyframes driveAcross {
+  0% {
+    transform: translateX(120vw) scaleX(-1);
+  }
+  60% {
+    transform: translateX(10vw) scaleX(-1);
+  }
+  100% {
+    transform: translateX(-20vw) scaleX(-1);
+  }
+}
+
+@keyframes wheelSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

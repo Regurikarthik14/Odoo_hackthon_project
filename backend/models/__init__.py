@@ -1,10 +1,10 @@
-from models.db import db
-from models.user import User
-from models.vehicle import Vehicle
-from models.driver import Driver
-from models.trip import Trip
-from models.maintenance import Maintenance
-from models.fuel_log import FuelLog
-from models.expense import Expense
+from flask_sqlalchemy import SQLAlchemy
 
-__all__ = ['db', 'User', 'Vehicle', 'Driver', 'Trip', 'Maintenance', 'FuelLog', 'Expense']
+db = SQLAlchemy()
+
+from .user import User
+from .vehicle import Vehicle
+from .driver import Driver
+from .trip import Trip
+from .maintenance import MaintenanceRecord
+from .expense import FuelLog, Expense

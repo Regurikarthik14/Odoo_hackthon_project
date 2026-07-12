@@ -1,361 +1,221 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { getTrips, createTrip, updateTripStatus, getVehicles, getDrivers } from '../services/api';
-
-const STATUSES = ['All', 'draft', 'dispatched', 'completed', 'cancelled'];
+import { useState, useEffect } from 'react';
+import { tripService, vehicleService, driverService } from '../services';
+import LoadingSpinner from '../components/LoadingSpinner';
+import toast from 'react-hot-toast';
+import './TablePage.css';
 
 export default function Trips() {
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('manage-trips');
-
   const [trips, setTrips] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [drivers, setDrivers] = useState([]);
-  const [availableVehicles, setAvailableVehicles] = useState([]);
-  const [availableDrivers, setAvailableDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [showModal, setShowModal] = useState(false);
-  const [showCompleteModal, setShowCompleteModal] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [completeData, setCompleteData] = useState(null);
 
   const [form, setForm] = useState({
-    source: '',
-    destination: '',
-    vehicleId: '',
-    driverId: '',
-    cargoWeight: '',
-    plannedDistance: '',
+    source: '', destination: '', cargo_weight: '',
+    planned_distance: '', vehicle_id: '', driver_id: ''
   });
 
-  const [completeForm, setCompleteForm] = useState({
-    odometerEnd: '',
-    fuelConsumed: '',
-  });
+  useEffect(() => { loadAll(); }, []);
 
-  const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
-
-  const loadData = useCallback(async () => {
+  const loadAll = async () => {
     try {
-      const filters = {};
-      if (statusFilter !== 'All') filters.status = statusFilter;
-      const [tripsData, vehiclesData, driversData] = await Promise.all([
-        getTrips(filters),
-        getVehicles(),
-        getDrivers(),
+      const [tripRes, vehRes, drvRes] = await Promise.all([
+        tripService.getAll(),
+        vehicleService.getAvailable(),
+        driverService.getAvailable()
       ]);
-      setTrips(tripsData);
-      setVehicles(vehiclesData);
-      setDrivers(driversData);
-      setAvailableVehicles(vehiclesData.filter(v => v.status === 'available'));
-      setAvailableDrivers(driversData.filter(d => d.status === 'available'));
+      setTrips(tripRes.data);
+      setVehicles(vehRes.data);
+      setDrivers(drvRes.data);
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, showToast]);
-
-  useEffect(() => {
-    setLoading(true);
-    loadData();
-  }, [loadData]);
-
-  const openCreateModal = async () => {
-    // Refresh available vehicles and drivers
-    try {
-      const [v, d] = await Promise.all([
-        getVehicles({ status: 'available' }),
-        getDrivers({ status: 'available' }),
-      ]);
-      setAvailableVehicles(v);
-      setAvailableDrivers(d);
-    } catch {}
-    setForm({ source: '', destination: '', vehicleId: '', driverId: '', cargoWeight: '', plannedDistance: '' });
-    setShowModal(true);
   };
 
-  const handleCreateTrip = async (e) => {
+  const openCreate = () => {
+    setForm({ source: '', destination: '', cargo_weight: '', planned_distance: '', vehicle_id: '', driver_id: '' });
+    setShowForm(true);
+  };
+
+  const handleCreate = async (e) => {
     e.preventDefault();
-    setSaving(true);
     try {
-      await createTrip({
-        ...form,
-        cargoWeight: Number(form.cargoWeight),
-        plannedDistance: Number(form.plannedDistance),
-        vehicleId: Number(form.vehicleId),
-        driverId: Number(form.driverId),
-      });
-      showToast('Trip dispatched successfully! 🚀');
-      setShowModal(false);
-      loadData();
+      await tripService.create(form);
+      toast.success('Trip created as draft');
+      setShowForm(false);
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setSaving(false);
+      toast.error(err.response?.data?.error || 'Failed to create trip');
     }
   };
 
-  const handleCompleteTrip = async (e) => {
-    e.preventDefault();
-    setSaving(true);
+  const handleDispatch = async (id) => {
     try {
-      await updateTripStatus(showCompleteModal, 'completed', {
-        odometerEnd: Number(completeForm.odometerEnd),
-        fuelConsumed: Number(completeForm.fuelConsumed),
-      });
-      showToast('Trip completed successfully! ✅');
-      setShowCompleteModal(null);
-      loadData();
+      await tripService.dispatch(id);
+      toast.success('Trip dispatched! Vehicle and driver are now On Trip');
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setSaving(false);
+      toast.error(err.response?.data?.error || 'Dispatch failed');
     }
   };
 
-  const handleCancelTrip = async (tripId) => {
-    if (!window.confirm('Are you sure you want to cancel this trip?')) return;
+  const handleComplete = async (id) => {
+    const finalOdometer = prompt('Enter final odometer reading (km):');
+    if (!finalOdometer) return;
+    const fuelConsumed = prompt('Enter fuel consumed (liters):');
+    if (!fuelConsumed) return;
+
     try {
-      await updateTripStatus(tripId, 'cancelled');
-      showToast('Trip cancelled');
-      loadData();
+      await tripService.complete(id, { final_odometer: parseFloat(finalOdometer), fuel_consumed: parseFloat(fuelConsumed) });
+      toast.success('Trip completed! Vehicle and driver are now Available');
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error(err.response?.data?.error || 'Failed to complete trip');
     }
   };
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const handleCancel = async (id) => {
+    if (!confirm('Cancel this trip?')) return;
+    try {
+      await tripService.cancel(id);
+      toast.success('Trip cancelled');
+      loadAll();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Cancel failed');
+    }
   };
 
-  // Calculate if cargo exceeds capacity
-  const selectedVehicle = availableVehicles.find(v => v.id === Number(form.vehicleId));
-  const cargoExceedsCapacity = selectedVehicle && Number(form.cargoWeight) > selectedVehicle.maxCapacity;
-
-  const getStatusBadgeClass = (status) => {
-    const map = { 'draft': 'draft', 'dispatched': 'dispatched', 'completed': 'completed', 'cancelled': 'cancelled' };
-    return map[status] || 'draft';
-  };
+  if (loading) return <LoadingSpinner fullScreen text="Loading trips..." />;
 
   return (
-    <div>
-      {toast && (
-        <div className="toast-container">
-          <div className={`toast ${toast.type}`}>
-            {toast.type === 'success' ? '✅' : '❌'} {toast.message}
+    <div className="page-container">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">🗺️ Trip Management</h1>
+          <p className="page-subtitle">Create, dispatch, and manage trips</p>
+        </div>
+        <button className="btn-primary" onClick={openCreate}>+ Create Trip</button>
+      </div>
+
+      {showForm && (
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">Create New Trip</h2>
+            <form onSubmit={handleCreate} className="modal-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Source *</label>
+                  <input className="form-input" value={form.source}
+                    onChange={(e) => setForm(f => ({ ...f, source: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Destination *</label>
+                  <input className="form-input" value={form.destination}
+                    onChange={(e) => setForm(f => ({ ...f, destination: e.target.value }))} required />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Cargo Weight (kg) *</label>
+                  <input type="number" className="form-input" value={form.cargo_weight}
+                    onChange={(e) => setForm(f => ({ ...f, cargo_weight: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Planned Distance (km)</label>
+                  <input type="number" className="form-input" value={form.planned_distance}
+                    onChange={(e) => setForm(f => ({ ...f, planned_distance: e.target.value }))} />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Available Vehicle *</label>
+                  <select className="form-input" value={form.vehicle_id}
+                    onChange={(e) => setForm(f => ({ ...f, vehicle_id: e.target.value }))} required>
+                    <option value="">Select vehicle...</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.registration_number} - {v.name} ({v.max_load_capacity} kg cap)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Available Driver *</label>
+                  <select className="form-input" value={form.driver_id}
+                    onChange={(e) => setForm(f => ({ ...f, driver_id: e.target.value }))} required>
+                    <option value="">Select driver...</option>
+                    {drivers.map(d => (
+                      <option key={d.id} value={d.id}>{d.name} - Lic: {d.license_number}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn-primary">Create Draft</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      <div className="page-header">
-        <div>
-          <h1>🗺️ Trip Management</h1>
-          <p>Create, dispatch, and monitor fleet trips.</p>
-        </div>
-        {canManage && (
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + New Trip
-          </button>
-        )}
-      </div>
-
-      <div className="filters-bar">
-        <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s.replace(/\b\w/g, l => l.toUpperCase())}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="table-container">
-        <table>
+      <div className="table-wrapper">
+        <table className="data-table">
           <thead>
             <tr>
+              <th>ID</th>
               <th>Route</th>
+              <th>Cargo</th>
               <th>Vehicle</th>
               <th>Driver</th>
-              <th>Cargo (kg)</th>
-              <th>Distance</th>
               <th>Status</th>
-              <th>Date</th>
-              {canManage && <th>Actions</th>}
+              <th>Fuel</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center text-muted" style={{ padding: 40 }}>⏳ Loading trips...</td>
-              </tr>
-            ) : trips.length === 0 ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center" style={{ padding: 40 }}>
-                  <div className="empty-state">
-                    <div className="empty-state-icon">🗺️</div>
-                    <h3>No trips found</h3>
-                    <p>Create a new trip to get started.</p>
+            {trips.length === 0 ? (
+              <tr><td colSpan={8} className="empty-state">No trips yet</td></tr>
+            ) : trips.map((trip) => (
+              <tr key={trip.id}>
+                <td>#{trip.id}</td>
+                <td>
+                  <strong>{trip.source}</strong> → <strong>{trip.destination}</strong>
+                  <div className="activity-meta">{trip.planned_distance} km planned</div>
+                </td>
+                <td>{trip.cargo_weight} kg</td>
+                <td>{trip.vehicle_reg || 'N/A'}</td>
+                <td>{trip.driver_name || 'N/A'}</td>
+                <td><span className={`status-badge status-${trip.status}`}>{trip.status}</span></td>
+                <td>{trip.fuel_consumed ? `${trip.fuel_consumed} L` : '—'}</td>
+                <td>
+                  <div className="action-btns">
+                    {trip.status === 'draft' && (
+                      <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                        onClick={() => handleDispatch(trip.id)}>🚀 Dispatch</button>
+                    )}
+                    {trip.status === 'dispatched' && (
+                      <>
+                        <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                          onClick={() => handleComplete(trip.id)}>✅ Complete</button>
+                        <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                          onClick={() => handleCancel(trip.id)}>❌ Cancel</button>
+                      </>
+                    )}
+                    {(trip.status === 'draft' || trip.status === 'dispatched') && (
+                      <button className="btn-icon" onClick={() => handleCancel(trip.id)} title="Cancel">🗑️</button>
+                    )}
                   </div>
                 </td>
               </tr>
-            ) : (
-              trips.map((trip) => (
-                <tr key={trip.id}>
-                  <td><strong>{trip.source}</strong> → {trip.destination}</td>
-                  <td>{trip.vehicleReg}</td>
-                  <td>{trip.driverName}</td>
-                  <td>{trip.cargoWeight?.toLocaleString()}</td>
-                  <td>{trip.plannedDistance} km</td>
-                  <td>
-                    <span className={`status-badge ${getStatusBadgeClass(trip.status)}`}>
-                      {trip.status}
-                    </span>
-                  </td>
-                  <td className="text-muted">{trip.startDate || '-'}</td>
-                  {canManage && (
-                    <td>
-                      <div className="flex gap-2">
-                        {trip.status === 'dispatched' && (
-                          <>
-                            <button className="btn btn-success btn-sm" onClick={() => { setShowCompleteModal(trip.id); setCompleteForm({ odometerEnd: '', fuelConsumed: '' }); }} title="Complete">✅</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => handleCancelTrip(trip.id)} title="Cancel">❌</button>
-                          </>
-                        )}
-                        {trip.status === 'draft' && (
-                          <button className="btn btn-danger btn-sm" onClick={() => handleCancelTrip(trip.id)} title="Cancel">🗑️</button>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))
-            )}
+            ))}
           </tbody>
         </table>
       </div>
-
-      {/* Create Trip Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
-            <div className="modal-header">
-              <h2>🚀 Dispatch New Trip</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <form onSubmit={handleCreateTrip}>
-              <div className="modal-body">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Source *</label>
-                    <input type="text" className="form-control" name="source" value={form.source} onChange={handleChange} placeholder="e.g., New York, NY" required />
-                  </div>
-                  <div className="form-group">
-                    <label>Destination *</label>
-                    <input type="text" className="form-control" name="destination" value={form.destination} onChange={handleChange} placeholder="e.g., Boston, MA" required />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Available Vehicle *</label>
-                    <select className="form-control" name="vehicleId" value={form.vehicleId} onChange={handleChange} required>
-                      <option value="">Select vehicle...</option>
-                      {availableVehicles.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.regNumber} - {v.name} (Capacity: {v.maxCapacity} kg)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Available Driver *</label>
-                    <select className="form-control" name="driverId" value={form.driverId} onChange={handleChange} required>
-                      <option value="">Select driver...</option>
-                      {availableDrivers.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name} (License: {d.licenseCategory})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Cargo Weight (kg) *</label>
-                    <input type="number" className="form-control" name="cargoWeight" value={form.cargoWeight} onChange={handleChange} placeholder="e.g., 450" required min="1" />
-                    {cargoExceedsCapacity && (
-                      <small style={{ color: '#ef4444', marginTop: 4, display: 'block' }}>
-                        ⚠️ Cargo exceeds vehicle capacity ({selectedVehicle.maxCapacity} kg)!
-                      </small>
-                    )}
-                  </div>
-                  <div className="form-group">
-                    <label>Planned Distance (km) *</label>
-                    <input type="number" className="form-control" name="plannedDistance" value={form.plannedDistance} onChange={handleChange} placeholder="e.g., 215" required min="1" />
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving || cargoExceedsCapacity}>
-                  {saving ? 'Dispatching...' : '🚀 Dispatch Trip'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Complete Trip Modal */}
-      {showCompleteModal && (
-        <div className="modal-overlay" onClick={() => setShowCompleteModal(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>✅ Complete Trip</h2>
-              <button className="modal-close" onClick={() => setShowCompleteModal(null)}>✕</button>
-            </div>
-            <form onSubmit={handleCompleteTrip}>
-              <div className="modal-body">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Final Odometer Reading (km) *</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={completeForm.odometerEnd}
-                      onChange={(e) => setCompleteForm({ ...completeForm, odometerEnd: e.target.value })}
-                      placeholder="e.g., 89500"
-                      required
-                      min="1"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Fuel Consumed (liters) *</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={completeForm.fuelConsumed}
-                      onChange={(e) => setCompleteForm({ ...completeForm, fuelConsumed: e.target.value })}
-                      placeholder="e.g., 65"
-                      required
-                      min="1"
-                      step="0.1"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCompleteModal(null)}>Cancel</button>
-                <button type="submit" className="btn btn-success" disabled={saving}>
-                  {saving ? 'Saving...' : '✅ Complete Trip'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

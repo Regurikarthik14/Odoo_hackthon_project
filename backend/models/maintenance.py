@@ -1,36 +1,36 @@
-from models.db import db
 from datetime import datetime
+from . import db
 
-class Maintenance(db.Model):
-    __tablename__ = 'maintenance'
 
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+class MaintenanceRecord(db.Model):
+    __tablename__ = 'maintenance_records'
+
+    id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=False)
-    type = db.Column(db.Enum('routine', 'repair', 'inspection', 'emergency', 'recall'), nullable=False, default='routine')
-    description = db.Column(db.Text, nullable=False)
-    service_date = db.Column(db.Date, nullable=False)
-    completion_date = db.Column(db.Date, nullable=True)
-    cost = db.Column(db.Numeric(12, 2), default=0)
-    service_provider = db.Column(db.String(255), nullable=True)
-    odometer_at_service = db.Column(db.Numeric(12, 2), nullable=True)
-    status = db.Column(db.Enum('scheduled', 'in-progress', 'completed', 'cancelled'), nullable=False, default='scheduled')
-    notes = db.Column(db.Text, nullable=True)
+    description = db.Column(db.String(500), nullable=False)
+    maintenance_type = db.Column(db.String(100), default='Other')
+    cost = db.Column(db.Float, default=0.0)
+    status = db.Column(db.String(20), default='active')
+    # statuses: active, closed
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime)
+    notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    vehicle = db.relationship('Vehicle', backref='maintenance_records', lazy=True)
 
     def to_dict(self):
         return {
             'id': self.id,
             'vehicle_id': self.vehicle_id,
-            'type': self.type,
+            'vehicle_reg': self.vehicle.registration_number if self.vehicle else None,
+            'vehicle_name': self.vehicle.name if self.vehicle else None,
             'description': self.description,
-            'service_date': self.service_date.isoformat() if self.service_date else None,
-            'completion_date': self.completion_date.isoformat() if self.completion_date else None,
-            'cost': float(self.cost) if self.cost else 0,
-            'service_provider': self.service_provider,
-            'odometer_at_service': float(self.odometer_at_service) if self.odometer_at_service else None,
+            'maintenance_type': self.maintenance_type,
+            'cost': self.cost,
             'status': self.status,
+            'start_date': self.start_date.isoformat() if self.start_date else None,
+            'end_date': self.end_date.isoformat() if self.end_date else None,
             'notes': self.notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

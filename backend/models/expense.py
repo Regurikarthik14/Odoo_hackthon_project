@@ -1,30 +1,51 @@
-from models.db import db
 from datetime import datetime
+from . import db
 
-class Expense(db.Model):
-    __tablename__ = 'expenses'
 
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=True)
-    trip_id = db.Column(db.Integer, db.ForeignKey('trips.id'), nullable=True)
-    category = db.Column(db.Enum('fuel', 'maintenance', 'toll', 'parking', 'insurance', 'tax', 'fine', 'other'), nullable=False)
-    amount = db.Column(db.Numeric(12, 2), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    expense_date = db.Column(db.Date, nullable=False)
-    receipt_url = db.Column(db.String(500), nullable=True)
+class FuelLog(db.Model):
+    __tablename__ = 'fuel_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=False)
+    liters = db.Column(db.Float, nullable=False)
+    cost = db.Column(db.Float, nullable=False)
+    date = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    vehicle = db.relationship('Vehicle', backref='expenses', lazy=True)
-    trip = db.relationship('Trip', backref='expenses', lazy=True)
 
     def to_dict(self):
         return {
             'id': self.id,
             'vehicle_id': self.vehicle_id,
-            'trip_id': self.trip_id,
-            'category': self.category,
-            'amount': float(self.amount) if self.amount else None,
+            'vehicle_reg': self.vehicle.registration_number if self.vehicle else None,
+            'liters': self.liters,
+            'cost': self.cost,
+            'date': self.date.isoformat() if self.date else None,
+            'notes': self.notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class Expense(db.Model):
+    __tablename__ = 'expenses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), nullable=False)
+    expense_type = db.Column(db.String(50), nullable=False)
+    # types: toll, maintenance, parking, other
+    amount = db.Column(db.Float, nullable=False)
+    date = db.Column(db.DateTime, default=datetime.utcnow)
+    description = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'vehicle_id': self.vehicle_id,
+            'vehicle_reg': self.vehicle.registration_number if self.vehicle else None,
+            'expense_type': self.expense_type,
+            'amount': self.amount,
+            'date': self.date.isoformat() if self.date else None,
             'description': self.description,
-            'expense_date': self.expense_date.isoformat() if self.expense_date else None,
-            'receipt_url': self.receipt_url,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }

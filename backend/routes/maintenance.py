@@ -1,96 +1,116 @@
 from flask import Blueprint, request, jsonify
-from models.maintenance import Maintenance
-from models.vehicle import Vehicle
-from models.db import db
-from middleware.auth_middleware import jwt_required, admin_required
+from flask_jwt_extended import jwt_required
 from datetime import datetime
+from models import db, MaintenanceRecord, Vehicle
+from middleware.auth import role_required
 
 maintenance_bp = Blueprint('maintenance', __name__, url_prefix='/api/maintenance')
 
-@maintenance_bp.route('', methods=['GET'])
-@jwt_required
-def get_maintenance():
-    q = Maintenance.query
-    for param, field in [('status', 'status'), ('vehicle_id', 'vehicle_id'), ('type', 'type')]:
-        val = request.args.get(param)
-        if val:
-            q = q.filter_by(**{field: int(val) if param == 'vehicle_id' else val})
-    rs = q.order_by(Maintenance.service_date.desc()).all()
-    return jsonify({'maintenance': [r.to_dict() for r in rs], 'total': len(rs)}), 200
 
-@maintenance_bp.route('/<int:rid>', methods=['GET'])
-@jwt_required
-def get_record(rid):
-    r = Maintenance.query.get(rid)
-    if not r:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify({'maintenance': r.to_dict()}), 200
+@maintenance_bp.route('', methods=['GET'])
+@jwt_required()
+def get_maintenance_records():
+    status = request.args.get('status')
+    vehicle_id = request.args.get('vehicle_id')
+    query = MaintenanceRecord.query
+    if status:
+        query = query.filter_by(status=status)
+    if vehicle_id:
+        query = query.filter_by(vehicle_id=int(vehicle_id))
+    records = query.order_by(MaintenanceRecord.created_at.desc()).all()
+    return jsonify([r.to_dict() for r in records]), 200
+
+
+@maintenance_bp.route('/active', methods=['GET'])
+@jwt_required()
+def get_active_maintenance():
+    records = MaintenanceRecord.query.filter_by(status='active').all()
+    return jsonify([r.to_dict() for r in records]), 200
+
+
+@maintenance_bp.route('/<int:record_id>', methods=['GET'])
+@jwt_required()
+def get_maintenance_record(record_id):
+    record = MaintenanceRecord.query.get_or_404(record_id)
+    return jsonify(record.to_dict()), 200
+
 
 @maintenance_bp.route('', methods=['POST'])
-@jwt_required
-def create_maintenance():
+@jwt_required()
+@role_required('fleet_manager')
+def create_maintenance_record():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for f in ['vehicle_id', 'description', 'service_date']:
-        if not data.get(f):
-            return jsonify({'error': f'Missing: {f}'}), 400
-    v = Vehicle.query.get(data['vehicle_id'])
-    if not v:
+        return jsonify({'error': 'No data provided'}), 400
+
+    vehicle_id = data.get('vehicle_id')
+    vehicle = Vehicle.query.get(vehicle_id)
+    if not vehicle:
         return jsonify({'error': 'Vehicle not found'}), 404
-    r = Maintenance(vehicle_id=data['vehicle_id'], type=data.get('type', 'routine'), description=data['description'],
-                    service_date=datetime.strptime(data['service_date'], '%Y-%m-%d').date(),
-                    cost=data.get('cost', 0), service_provider=data.get('service_provider'),
-                    odometer_at_service=data.get('odometer_at_service'), status=data.get('status', 'scheduled'), notes=data.get('notes'))
-    if data.get('completion_date'):
-        r.completion_date = datetime.strptime(data['completion_date'], '%Y-%m-%d').date()
-    db.session.add(r)
-    if r.status in ('scheduled', 'in-progress') and v.status == 'available':
-        v.status = 'in-shop'
-    db.session.commit()
-    return jsonify({'message': 'Created', 'maintenance': r.to_dict()}), 201
 
-@maintenance_bp.route('/<int:rid>', methods=['PUT'])
-@jwt_required
-def update_maintenance(rid):
-    r = Maintenance.query.get(rid)
-    if not r:
-        return jsonify({'error': 'Not found'}), 404
+    if vehicle.is_retired():
+        return jsonify({'error': 'Cannot add retired vehicle to maintenance'}), 400
+
+    record = MaintenanceRecord(
+        vehicle_id=vehicle_id,
+        description=data.get('description', ''),
+        maintenance_type=data.get('maintenance_type', 'Other'),
+        cost=data.get('cost', 0),
+        notes=data.get('notes', ''),
+        status='active'
+    )
+
+    # Auto-change vehicle status to in_shop
+    vehicle.status = 'in_shop'
+
+    db.session.add(record)
+    db.session.commit()
+    return jsonify(record.to_dict()), 201
+
+
+@maintenance_bp.route('/<int:record_id>/close', methods=['PUT'])
+@jwt_required()
+@role_required('fleet_manager')
+def close_maintenance(record_id):
+    record = MaintenanceRecord.query.get_or_404(record_id)
+
+    if record.status != 'active':
+        return jsonify({'error': 'Maintenance record is not active'}), 400
+
+    record.status = 'closed'
+    record.end_date = datetime.utcnow()
+
+    # Restore vehicle to available (unless retired)
+    vehicle = Vehicle.query.get(record.vehicle_id)
+    if vehicle and not vehicle.is_retired():
+        vehicle.status = 'available'
+
+    db.session.commit()
+    return jsonify(record.to_dict()), 200
+
+
+@maintenance_bp.route('/<int:record_id>', methods=['PUT'])
+@jwt_required()
+@role_required('fleet_manager')
+def update_maintenance_record(record_id):
+    record = MaintenanceRecord.query.get_or_404(record_id)
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    v = Vehicle.query.get(r.vehicle_id)
-    for field in ['type', 'description', 'cost', 'service_provider', 'odometer_at_service', 'notes']:
-        if field in data:
-            setattr(r, field, data[field])
-    if 'service_date' in data:
-        r.service_date = datetime.strptime(data['service_date'], '%Y-%m-%d').date()
-    if 'completion_date' in data:
-        r.completion_date = datetime.strptime(data['completion_date'], '%Y-%m-%d').date() if data['completion_date'] else None
-    if 'status' in data:
-        old = r.status
-        r.status = data['status']
-        if v and data['status'] == 'completed' and old != 'completed':
-            v.last_maintenance_date = r.completion_date or r.service_date
-            if v.status == 'in-shop':
-                v.status = 'available'
-        elif v and data['status'] in ('scheduled', 'in-progress') and v.status == 'available':
-            v.status = 'in-shop'
-    db.session.commit()
-    return jsonify({'message': 'Updated', 'maintenance': r.to_dict()}), 200
+        return jsonify({'error': 'No data provided'}), 400
 
-@maintenance_bp.route('/<int:rid>', methods=['DELETE'])
-@admin_required
-def delete_maintenance(rid):
-    r = Maintenance.query.get(rid)
-    if not r:
-        return jsonify({'error': 'Not found'}), 404
-    v = Vehicle.query.get(r.vehicle_id)
-    if v and v.status == 'in-shop':
-        other = Maintenance.query.filter(Maintenance.vehicle_id == r.vehicle_id, Maintenance.id != r.id,
-                                         Maintenance.status.in_(['scheduled', 'in-progress'])).first()
-        if not other:
-            v.status = 'available'
-    db.session.delete(r)
+    for field in ['description', 'maintenance_type', 'cost', 'notes']:
+        if field in data:
+            setattr(record, field, data[field])
+
     db.session.commit()
-    return jsonify({'message': 'Deleted'}), 200
+    return jsonify(record.to_dict()), 200
+
+
+@maintenance_bp.route('/<int:record_id>', methods=['DELETE'])
+@jwt_required()
+@role_required('fleet_manager')
+def delete_maintenance_record(record_id):
+    record = MaintenanceRecord.query.get_or_404(record_id)
+    db.session.delete(record)
+    db.session.commit()
+    return jsonify({'message': 'Maintenance record deleted'}), 200

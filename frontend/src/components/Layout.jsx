@@ -1,38 +1,24 @@
-import React, { useState, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
-import Navbar from './Navbar';
+import CarAnimation from './CarAnimation';
+import './Layout.css';
 
 export default function Layout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const [carTrigger, setCarTrigger] = useState(0);
 
-  const handleToggle = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
-  }, []);
-
-  const handleMobileToggle = useCallback(() => {
-    setMobileOpen((prev) => !prev);
-  }, []);
-
-  const handleMobileClose = useCallback(() => {
-    setMobileOpen(false);
-  }, []);
+  useEffect(() => {
+    setCarTrigger((prev) => prev + 1);
+  }, [location.pathname]);
 
   return (
-    <div className="app-layout">        <Sidebar
-          collapsed={sidebarCollapsed}
-          mobileOpen={mobileOpen}
-          onToggle={handleToggle}
-          onMobileClose={handleMobileClose}
-        />
-      <div className={`main-area ${sidebarCollapsed ? 'expanded' : ''}`}>
-        <Navbar pathname={location.pathname} onMenuToggle={handleMobileToggle} />
-        <main className="page-container">
-          <Outlet />
-        </main>
-      </div>
+    <div className="app-layout">
+      <Sidebar />
+      <main className="main-content">
+        <Outlet />
+      </main>
+      <CarAnimation trigger={carTrigger} />
     </div>
   );
 }

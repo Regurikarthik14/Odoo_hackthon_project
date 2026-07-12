@@ -1,0 +1,31 @@
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+}
+
+.main-content {
+  margin-left: 240px;
+  padding: 28px 32px;
+  flex: 1;
+  min-height: 100vh;
+  animation: fadeInContent 0.4s ease forwards;
+}
+
+@keyframes fadeInContent {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 60px;
+    padding: 16px;
+  }
+}

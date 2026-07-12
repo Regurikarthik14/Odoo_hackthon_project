@@ -1,75 +1,105 @@
 from flask import Blueprint, request, jsonify
-from models.vehicle import Vehicle
-from models.db import db
-from middleware.auth_middleware import jwt_required, admin_required
-from datetime import datetime
+from flask_jwt_extended import jwt_required
+from models import db, Vehicle
+from middleware.auth import role_required
 
 vehicles_bp = Blueprint('vehicles', __name__, url_prefix='/api/vehicles')
 
+
 @vehicles_bp.route('', methods=['GET'])
-@jwt_required
+@jwt_required()
 def get_vehicles():
     status = request.args.get('status')
-    q = Vehicle.query
-    if status:
-        q = q.filter_by(status=status)
-    vs = q.order_by(Vehicle.created_at.desc()).all()
-    return jsonify({'vehicles': [v.to_dict() for v in vs], 'total': len(vs)}), 200
+    vehicle_type = request.args.get('vehicle_type')
+    region = request.args.get('region')
 
-@vehicles_bp.route('/<int:vid>', methods=['GET'])
-@jwt_required
-def get_vehicle(vid):
-    v = Vehicle.query.get(vid)
-    if not v:
-        return jsonify({'error': 'Vehicle not found'}), 404
-    return jsonify({'vehicle': v.to_dict()}), 200
+    query = Vehicle.query
+    if status:
+        query = query.filter_by(status=status)
+    if vehicle_type:
+        query = query.filter_by(vehicle_type=vehicle_type)
+    if region:
+        query = query.filter_by(region=region)
+
+    vehicles = query.order_by(Vehicle.created_at.desc()).all()
+    return jsonify([v.to_dict() for v in vehicles]), 200
+
+
+@vehicles_bp.route('/available', methods=['GET'])
+@jwt_required()
+def get_available_vehicles():
+    vehicles = Vehicle.query.filter_by(status='available').all()
+    return jsonify([v.to_dict() for v in vehicles]), 200
+
+
+@vehicles_bp.route('/<int:vehicle_id>', methods=['GET'])
+@jwt_required()
+def get_vehicle(vehicle_id):
+    vehicle = Vehicle.query.get_or_404(vehicle_id)
+    return jsonify(vehicle.to_dict()), 200
+
 
 @vehicles_bp.route('', methods=['POST'])
-@admin_required
+@jwt_required()
+@role_required('fleet_manager')
 def create_vehicle():
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for f in ['registration_number', 'make', 'model', 'year', 'capacity_kg']:
-        if not data.get(f):
-            return jsonify({'error': f'Missing: {f}'}), 400
-    if Vehicle.query.filter_by(registration_number=data['registration_number']).first():
-        return jsonify({'error': 'Registration number exists'}), 409
-    v = Vehicle(registration_number=data['registration_number'], make=data['make'], model=data['model'],
-                year=data['year'], capacity_kg=data['capacity_kg'], fuel_type=data.get('fuel_type', 'diesel'),
-                status=data.get('status', 'available'), odometer_km=data.get('odometer_km', 0))
-    if data.get('last_maintenance_date'):
-        v.last_maintenance_date = datetime.strptime(data['last_maintenance_date'], '%Y-%m-%d').date()
-    if data.get('next_maintenance_date'):
-        v.next_maintenance_date = datetime.strptime(data['next_maintenance_date'], '%Y-%m-%d').date()
-    db.session.add(v)
-    db.session.commit()
-    return jsonify({'message': 'Created', 'vehicle': v.to_dict()}), 201
+        return jsonify({'error': 'No data provided'}), 400
 
-@vehicles_bp.route('/<int:vid>', methods=['PUT'])
-@admin_required
-def update_vehicle(vid):
-    v = Vehicle.query.get(vid)
-    if not v:
-        return jsonify({'error': 'Not found'}), 404
+    reg_num = data.get('registration_number', '').strip()
+    if not reg_num:
+        return jsonify({'error': 'Registration number is required'}), 400
+
+    if Vehicle.query.filter_by(registration_number=reg_num).first():
+        return jsonify({'error': 'Vehicle with this registration number already exists'}), 409
+
+    vehicle = Vehicle(
+        registration_number=reg_num,
+        name=data.get('name', ''),
+        model=data.get('model', ''),
+        vehicle_type=data.get('vehicle_type', 'truck'),
+        max_load_capacity=data.get('max_load_capacity', 0),
+        odometer=data.get('odometer', 0),
+        acquisition_cost=data.get('acquisition_cost', 0),
+        region=data.get('region', 'unknown'),
+        status=data.get('status', 'available')
+    )
+    db.session.add(vehicle)
+    db.session.commit()
+    return jsonify(vehicle.to_dict()), 201
+
+
+@vehicles_bp.route('/<int:vehicle_id>', methods=['PUT'])
+@jwt_required()
+@role_required('fleet_manager')
+def update_vehicle(vehicle_id):
+    vehicle = Vehicle.query.get_or_404(vehicle_id)
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
-    for field in ['registration_number', 'make', 'model', 'year', 'capacity_kg', 'fuel_type', 'status', 'odometer_km']:
-        if field in data:
-            setattr(v, field, data[field])
-    for d_field, obj_field in [('last_maintenance_date', 'last_maintenance_date'), ('next_maintenance_date', 'next_maintenance_date')]:
-        if d_field in data:
-            setattr(v, obj_field, datetime.strptime(data[d_field], '%Y-%m-%d').date() if data[d_field] else None)
-    db.session.commit()
-    return jsonify({'message': 'Updated', 'vehicle': v.to_dict()}), 200
+        return jsonify({'error': 'No data provided'}), 400
 
-@vehicles_bp.route('/<int:vid>', methods=['DELETE'])
-@admin_required
-def delete_vehicle(vid):
-    v = Vehicle.query.get(vid)
-    if not v:
-        return jsonify({'error': 'Not found'}), 404
-    db.session.delete(v)
+    if 'registration_number' in data:
+        new_reg = data['registration_number'].strip()
+        existing = Vehicle.query.filter_by(registration_number=new_reg).first()
+        if existing and existing.id != vehicle_id:
+            return jsonify({'error': 'Registration number already in use'}), 409
+        vehicle.registration_number = new_reg
+
+    for field in ['name', 'model', 'vehicle_type', 'max_load_capacity',
+                  'odometer', 'acquisition_cost', 'status', 'region']:
+        if field in data:
+            setattr(vehicle, field, data[field])
+
     db.session.commit()
-    return jsonify({'message': 'Deleted'}), 200
+    return jsonify(vehicle.to_dict()), 200
+
+
+@vehicles_bp.route('/<int:vehicle_id>', methods=['DELETE'])
+@jwt_required()
+@role_required('fleet_manager')
+def delete_vehicle(vehicle_id):
+    vehicle = Vehicle.query.get_or_404(vehicle_id)
+    db.session.delete(vehicle)
+    db.session.commit()
+    return jsonify({'message': 'Vehicle deleted successfully'}), 200

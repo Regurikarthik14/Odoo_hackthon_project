@@ -1,261 +1,190 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
+import { maintenanceService, vehicleService } from '../services';
+import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
-import { getMaintenanceRecords, createMaintenanceRecord, closeMaintenanceRecord, deleteMaintenanceRecord, getVehicles } from '../services/api';
-
-const STATUSES = ['All', 'active', 'closed'];
-const MAINTENANCE_TYPES = ['Oil Change', 'Tire Replacement', 'Brake Service', 'Engine Repair', 'Transmission Service', 'AC Service', 'Electrical Repair', 'Body Work', 'Other'];
+import toast from 'react-hot-toast';
+import './TablePage.css';
 
 export default function Maintenance() {
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('manage-maintenance');
-
   const [records, setRecords] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [showModal, setShowModal] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('fleet_manager');
 
   const [form, setForm] = useState({
-    vehicleId: '',
-    type: 'Oil Change',
-    description: '',
-    cost: '',
-    mechanic: '',
+    vehicle_id: '', description: '', maintenance_type: 'Other', cost: '', notes: ''
   });
 
-  const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  const loadData = useCallback(async () => {
+  const loadAll = async () => {
     try {
-      const filters = {};
-      if (statusFilter !== 'All') filters.status = statusFilter;
-      const [recordsData, vehiclesData] = await Promise.all([
-        getMaintenanceRecords(filters),
-        getVehicles(),
+      const [maintRes, vehRes] = await Promise.all([
+        maintenanceService.getAll(),
+        vehicleService.getAll()
       ]);
-      setRecords(recordsData);
-      setVehicles(vehiclesData.filter(v => v.status !== 'retired'));
+      setRecords(maintRes.data);
+      setVehicles(vehRes.data);
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, showToast]);
+  };
 
-  useEffect(() => {
-    setLoading(true);
-    loadData();
-  }, [loadData]);
-
-  const openCreateModal = () => {
-    setForm({ vehicleId: '', type: 'Oil Change', description: '', cost: '', mechanic: '' });
-    setShowModal(true);
+  const openCreate = () => {
+    setForm({ vehicle_id: '', description: '', maintenance_type: 'Oil Change', cost: '', notes: '' });
+    setShowForm(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSaving(true);
     try {
-      await createMaintenanceRecord({
-        ...form,
-        cost: Number(form.cost),
-        vehicleId: Number(form.vehicleId),
-      });
-      showToast('Maintenance record created. Vehicle set to In Shop.');
-      setShowModal(false);
-      loadData();
+      await maintenanceService.create(form);
+      toast.success('Maintenance record created. Vehicle status → In Shop');
+      setShowForm(false);
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setSaving(false);
+      toast.error(err.response?.data?.error || 'Failed to create record');
     }
   };
 
   const handleClose = async (id) => {
+    if (!confirm('Close this maintenance record? Vehicle will be set to Available.')) return;
     try {
-      await closeMaintenanceRecord(id);
-      showToast('Maintenance closed. Vehicle restored to Available.');
-      loadData();
+      await maintenanceService.close(id);
+      toast.success('Maintenance closed. Vehicle restored to Available');
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Failed to close maintenance');
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this maintenance record?')) return;
+    if (!confirm('Delete this maintenance record?')) return;
     try {
-      await deleteMaintenanceRecord(id);
-      showToast('Record deleted');
-      loadData();
+      await maintenanceService.delete(id);
+      toast.success('Record deleted');
+      loadAll();
     } catch (err) {
-      showToast(err.message, 'error');
+      toast.error('Delete failed');
     }
   };
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-
-  const getStatusBadgeClass = (status) => {
-    return status === 'active' ? 'maintenance' : 'available';
-  };
+  if (loading) return <LoadingSpinner fullScreen text="Loading maintenance records..." />;
 
   return (
-    <div>
-      {toast && (
-        <div className="toast-container">
-          <div className={`toast ${toast.type}`}>
-            {toast.type === 'success' ? '✅' : '❌'} {toast.message}
+    <div className="page-container">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">🔧 Maintenance</h1>
+          <p className="page-subtitle">Track vehicle maintenance and repairs</p>
+        </div>
+        {canEdit && <button className="btn-primary" onClick={openCreate}>+ Add Record</button>}
+      </div>
+
+      {showForm && (
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">Create Maintenance Record</h2>
+            <form onSubmit={handleSubmit} className="modal-form">
+              <div className="form-group" style={{ width: '100%' }}>
+                <label>Vehicle *</label>
+                <select className="form-input" value={form.vehicle_id}
+                  onChange={(e) => setForm(f => ({ ...f, vehicle_id: e.target.value }))} required>
+                  <option value="">Select vehicle...</option>
+                  {vehicles.filter(v => v.status !== 'retired').map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.registration_number} - {v.name} [{v.status}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Maintenance Type</label>
+                  <select className="form-input" value={form.maintenance_type}
+                    onChange={(e) => setForm(f => ({ ...f, maintenance_type: e.target.value }))}>
+                    <option value="Oil Change">Oil Change</option>
+                    <option value="Brake Service">Brake Service</option>
+                    <option value="Tire Replacement">Tire Replacement</option>
+                    <option value="Engine Repair">Engine Repair</option>
+                    <option value="Transmission">Transmission</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Cost ($)</label>
+                  <input type="number" className="form-input" value={form.cost}
+                    onChange={(e) => setForm(f => ({ ...f, cost: e.target.value }))} />
+                </div>
+              </div>
+              <div className="form-group" style={{ width: '100%' }}>
+                <label>Description *</label>
+                <textarea className="form-input" rows="3" value={form.description}
+                  onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} required
+                  style={{ resize: 'vertical' }} />
+              </div>
+              <div className="form-group" style={{ width: '100%' }}>
+                <label>Notes</label>
+                <textarea className="form-input" rows="2" value={form.notes}
+                  onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                  style={{ resize: 'vertical' }} />
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn-primary">Create</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      <div className="page-header">
-        <div>
-          <h1>🔧 Maintenance</h1>
-          <p>Track vehicle maintenance and service records.</p>
-        </div>
-        {canManage && (
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + Add Record
-          </button>
-        )}
-      </div>
-
-      <div className="filters-bar">
-        <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s.replace(/\b\w/g, l => l.toUpperCase())}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="table-container">
-        <table>
+      <div className="table-wrapper">
+        <table className="data-table">
           <thead>
             <tr>
               <th>Vehicle</th>
               <th>Type</th>
               <th>Description</th>
               <th>Cost</th>
-              <th>Date</th>
-              <th>Mechanic</th>
               <th>Status</th>
-              {canManage && <th>Actions</th>}
+              <th>Start Date</th>
+              <th>End Date</th>
+              {canEdit && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center text-muted" style={{ padding: 40 }}>⏳ Loading maintenance records...</td>
-              </tr>
-            ) : records.length === 0 ? (
-              <tr>
-                <td colSpan={canManage ? 8 : 7} className="text-center" style={{ padding: 40 }}>
-                  <div className="empty-state">
-                    <div className="empty-state-icon">🔧</div>
-                    <h3>No maintenance records</h3>
-                    <p>Create a maintenance record to track vehicle servicing.</p>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              records.map((record) => (
-                <tr key={record.id}>
-                  <td><strong>{record.vehicleReg}</strong> - {record.vehicleName}</td>
-                  <td>{record.type}</td>
-                  <td style={{ maxWidth: 200 }} className="truncate">{record.description}</td>
-                  <td>${record.cost?.toLocaleString()}</td>
-                  <td className="text-muted">{record.date}</td>
-                  <td>{record.mechanic}</td>
+            {records.length === 0 ? (
+              <tr><td colSpan={canEdit ? 8 : 7} className="empty-state">No maintenance records</td></tr>
+            ) : records.map((r) => (
+              <tr key={r.id}>
+                <td><strong>{r.vehicle_reg}</strong><br /><span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.vehicle_name}</span></td>
+                <td>{r.maintenance_type}</td>
+                <td>{r.description}</td>
+                <td>${r.cost?.toFixed(2)}</td>
+                <td><span className={`status-badge status-${r.status}`}>{r.status}</span></td>
+                <td>{r.start_date?.split('T')[0] || '—'}</td>
+                <td>{r.end_date?.split('T')[0] || '—'}</td>
+                {canEdit && (
                   <td>
-                    <span className={`status-badge ${getStatusBadgeClass(record.status)}`}>
-                      {record.status}
-                    </span>
+                    <div className="action-btns">
+                      {r.status === 'active' && (
+                        <button className="btn-primary" style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                          onClick={() => handleClose(r.id)}>✓ Close</button>
+                      )}
+                      <button className="btn-icon" onClick={() => handleDelete(r.id)} title="Delete">🗑️</button>
+                    </div>
                   </td>
-                  {canManage && (
-                    <td>
-                      <div className="flex gap-2">
-                        {record.status === 'active' && (
-                          <button className="btn btn-success btn-sm" onClick={() => handleClose(record.id)} title="Close Maintenance">
-                            ✅ Close
-                          </button>
-                        )}
-                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(record.id)} title="Delete">
-                          🗑️
-                        </button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))
-            )}
+                )}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-
-      {/* Create Maintenance Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>🔧 Add Maintenance Record</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <form onSubmit={handleSubmit}>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label>Vehicle *</label>
-                  <select className="form-control" name="vehicleId" value={form.vehicleId} onChange={handleChange} required>
-                    <option value="">Select vehicle...</option>
-                    {vehicles.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.regNumber} - {v.name} (Status: {v.status})
-                      </option>
-                    ))}
-                  </select>
-                  <small className="text-muted" style={{ marginTop: 4, display: 'block' }}>
-                    Vehicle will be set to "In Shop" automatically.
-                  </small>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Maintenance Type *</label>
-                    <select className="form-control" name="type" value={form.type} onChange={handleChange}>
-                      {MAINTENANCE_TYPES.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Cost ($) *</label>
-                    <input type="number" className="form-control" name="cost" value={form.cost} onChange={handleChange} placeholder="e.g., 450" required min="1" />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label>Description</label>
-                  <textarea className="form-control" name="description" value={form.description} onChange={handleChange} placeholder="Describe the maintenance work..." />
-                </div>
-                <div className="form-group">
-                  <label>Mechanic / Shop</label>
-                  <input type="text" className="form-control" name="mechanic" value={form.mechanic} onChange={handleChange} placeholder="e.g., AutoCare Center" />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Saving...' : 'Create Record'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
