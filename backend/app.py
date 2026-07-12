@@ -45,9 +45,11 @@ def create_app():
 
     return app
 
+# 1. EXPORT GLOBALLY FOR VERCEL (No indentation)
+app = create_app()
 
+# 2. KEEP THIS FOR LOCAL DEVELOPMENT ONLY
 if __name__ == '__main__':
-    app = create_app()
     print('ODDO Fleet Management API starting...')
     print('   http://localhost:5000')
     app.run(debug=True, host='0.0.0.0', port=5000)
